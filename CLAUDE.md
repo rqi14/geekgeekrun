@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Manager
 
-**Always use `proto run pnpm -- <args>`** instead of bare `pnpm`. The project requires pnpm `>=8.15.9 <9.0.0`; the system pnpm (10.x) is incompatible and will cause errors.
+Use bare `pnpm` (v8 or v10+ both work). The `engines.pnpm` constraint is `>=8.15.9`.
 
 ```bash
-proto run pnpm -- install
-proto run pnpm -- -F geekgeekrun-ui dev
+pnpm install
+pnpm -F geekgeekrun-ui dev
 ```
 
 ## Key Commands
@@ -17,20 +17,20 @@ All UI development happens in `packages/ui`. The `dev`/`build`/`start` scripts a
 
 ```bash
 # Electron app (main entry point for users)
-proto run pnpm -- -F geekgeekrun-ui dev          # development mode
-proto run pnpm -- -F geekgeekrun-ui build         # production build
-proto run pnpm -- -F geekgeekrun-ui build:win     # Windows installer
+pnpm -F geekgeekrun-ui dev          # development mode
+pnpm -F geekgeekrun-ui build         # production build
+pnpm -F geekgeekrun-ui build:win     # Windows installer
 
 # Lint & format (run from packages/ui)
-proto run pnpm -- -F geekgeekrun-ui lint          # eslint --fix
-proto run pnpm -- -F geekgeekrun-ui format        # prettier --write
+pnpm -F geekgeekrun-ui lint          # eslint --fix
+pnpm -F geekgeekrun-ui format        # prettier --write
 
 # Type checking (run from packages/ui)
-proto run pnpm -- -F geekgeekrun-ui typecheck     # both node + web
+pnpm -F geekgeekrun-ui typecheck     # both node + web
 
 # SQLite plugin (must build before UI if changed)
-proto run pnpm -- -F @geekgeekrun/sqlite-plugin build
-proto run pnpm -- -F @geekgeekrun/sqlite-plugin dev   # watch mode
+pnpm -F @geekgeekrun/sqlite-plugin build
+pnpm -F @geekgeekrun/sqlite-plugin dev   # watch mode
 ```
 
 ## Architecture
