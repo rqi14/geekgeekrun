@@ -17,6 +17,9 @@ import { setupNetworkInterceptor, setupCanvasTextHook } from './resume-extractor
 import { parseCandidateList, filterCandidates, scrollAndLoadMore } from './candidate-processor.mjs'
 import { processCandidate, checkDailyLimit, clickNotInterested } from './chat-handler.mjs'
 import { setLevel, debug as logDebug, info as logInfo, warn as logWarn, error as logError } from './logger.mjs'
+import { preflightGhostCursor, randomizeInitialCursorPosition } from './humanMouse.mjs'
+import { buildRecruiterLaunchOptions } from './launch-options.mjs'
+import { checkpointRiskControl } from './risk-detector.mjs'
 
 export { default as startBossChatPageProcess } from './chat-page-processor.mjs'
 
@@ -53,7 +56,9 @@ export async function initPuppeteer () {
   puppeteer.use(StealthPlugin())
   puppeteer.use(LaodengPlugin())
   puppeteer.use(AnonymizeUaPlugin({ makeWindows: false }))
-  logDebug('[boss-auto-browse] initPuppeteer: 插件已注册')
+  // ghost-cursor preflight：fail-fast，避免后续静默退化为裸 page.click()
+  await preflightGhostCursor()
+  logDebug('[boss-auto-browse] initPuppeteer: 插件已注册（含 ghost-cursor preflight）')
   return {
     puppeteer,
     StealthPlugin,
@@ -101,14 +106,10 @@ const localStoragePageUrl = 'https://www.zhipin.com/desktop/'
  */
 export async function launchBrowserAndNavigateToChat () {
   if (!puppeteer) await initPuppeteer()
-  const headless = process.env.HEADLESS === '1'
-  const browser = await puppeteer.launch({
-    headless,
-    ignoreHTTPSErrors: true,
-    protocolTimeout: 120000,
-    defaultViewport: { width: 1440, height: 900 - 140 }
-  })
+  const launchOpts = await buildRecruiterLaunchOptions()
+  const browser = await puppeteer.launch(launchOpts)
   const page = (await browser.pages())[0]
+  await randomizeInitialCursorPosition(page).catch(() => {})
   const bossCookies = readStorageFile('boss-cookies.json')
   const bossLocalStorage = readStorageFile('boss-local-storage.json')
   if (Array.isArray(bossCookies) && bossCookies.length > 0) {
@@ -246,20 +247,12 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     } else {
       await hooks.beforeBrowserLaunch?.promise?.()
 
-      const headlessEnv = process.env.HEADLESS
-      const headless = headlessEnv === '1'
-      logDebug('[boss-auto-browse] 即将启动浏览器', { headless, HEADLESS_env: headlessEnv ?? null })
-      browser = await puppeteer.launch({
-        headless,
-        ignoreHTTPSErrors: true,
-        protocolTimeout: 120000,
-        defaultViewport: {
-          width: 1440,
-          height: 900 - 140
-        }
-      })
+      const launchOpts = await buildRecruiterLaunchOptions()
+      logDebug('[boss-auto-browse] 即将启动浏览器', { headless: launchOpts.headless, persistProfile: !!launchOpts.userDataDir })
+      browser = await puppeteer.launch(launchOpts)
 
       page = (await browser.pages())[0]
+      await randomizeInitialCursorPosition(page).catch(() => {})
 
       await hooks.afterBrowserLaunch?.promise?.()
     }
@@ -572,10 +565,18 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
           logInfo('[boss-auto-browse] ✓ 已向', candidate.geekName, '发送招呼（本次共', chatCount, '人）')
         } else {
           logInfo('[boss-auto-browse] ✗', candidate.geekName, '开聊失败：', chatResult.reason)
-          if (chatResult.reason === 'DAILY_LIMIT_REACHED' || chatResult.reason === 'RISK_CONTROL') {
+          if (chatResult.reason === 'DAILY_LIMIT_REACHED') {
             break mainLoop
           }
+          // 'RISK_CONTROL' 落到下面统一 checkpoint 处理
         }
+
+        // 每位候选人处理完都做一次 checkpoint：检测到验证则在循环内等待用户完成，避免崩出 catch + 3s 重试导致连环触发
+        const cpStatus = await checkpointRiskControl(page, {
+          expectedUrlPrefix: BOSS_RECOMMEND_PAGE_URL,
+          log: logWarn
+        })
+        if (cpStatus === 'timed-out') break mainLoop
       }
 
       // e. 滚动加载 / 翻页（在 iframe frame 内操作）

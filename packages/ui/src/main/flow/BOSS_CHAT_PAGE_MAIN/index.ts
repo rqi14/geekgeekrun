@@ -230,13 +230,12 @@ const runChatPage = async () => {
         log('启动浏览器...')
         await hooks.beforeBrowserLaunch?.promise?.()
 
-        const headless = process.env.HEADLESS === '1'
-        browser = await puppeteer.launch({
-          headless,
-          ignoreHTTPSErrors: true,
-          protocolTimeout: 120000,
-          defaultViewport: { width: 1440, height: 900 - 140 }
-        })
+        const { buildRecruiterLaunchOptions } = (await import(
+          '@geekgeekrun/boss-auto-browse-and-chat/launch-options.mjs'
+        )) as any
+        const launchOpts = await buildRecruiterLaunchOptions()
+        log(`使用 launch options：persistProfile=${!!launchOpts.userDataDir}`)
+        browser = await puppeteer.launch(launchOpts)
 
         await hooks.afterBrowserLaunch?.promise?.()
 
