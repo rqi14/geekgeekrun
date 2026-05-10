@@ -157,7 +157,7 @@ const CANVAS_HOOK_DEBUG = process.env.GEEKGEEKRUN_CANVAS_HOOK_DEBUG === '1'
  * 不同 session 不同；同时通过 laodeng.registerFakeNativeSource 让 fillText 包装函数的 toString 返回原生外观。
  *
  * @param {import('puppeteer').Page} page - Puppeteer 页面实例（必须在 page.goto 之前调用）
- * @returns {Promise<{ getCapturedText: (page: import('puppeteer').Page) => Promise<Array<{text: string, x: number, y: number}>> }>}
+ * @returns {Promise<{ getCapturedText: (page: import('puppeteer').Page) => Promise<Array<{text: string, x: number, y: number}>>, clearCapturedText: (page: import('puppeteer').Page) => Promise<void>, peekCapturedText: (page: import('puppeteer').Page) => Promise<number> }>}
  */
 export async function setupCanvasTextHook (page) {
   const markerSuffix = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
@@ -294,7 +294,17 @@ export async function setupCanvasTextHook (page) {
     await p.evaluate((prop) => { window[prop] = [] }, capturedTextProp)
   }
 
-  return { getCapturedText, clearCapturedText }
+  /**
+   * Peek at how many canvas text items have been captured so far, without consuming them.
+   * Used for "stable count" polling to detect when Canvas rendering has finished.
+   * @param {import('puppeteer').Page} p
+   * @returns {Promise<number>}
+   */
+  async function peekCapturedText (p) {
+    return p.evaluate((prop) => (window[prop] || []).length, capturedTextProp)
+  }
+
+  return { getCapturedText, clearCapturedText, peekCapturedText }
 }
 
 // ---------------------------------------------------------------------------
@@ -346,13 +356,15 @@ export function extractResumeText (capturedTextArray) {
 // ---------------------------------------------------------------------------
 
 /**
- * 优先从拦截的 API 数据中取简历，若无则从页面 window.__canvasCapturedText 中提取（需先调用 setupCanvasTextHook）。
+ * 优先从拦截的 API 数据中取简历，若无则从页面 Canvas hook 中提取（需先调用 setupCanvasTextHook）。
  *
  * @param {import('puppeteer').Page} page - Puppeteer 页面实例
  * @param {Map<string, unknown>} interceptedData - setupNetworkInterceptor 返回的 getInterceptedData() 的结果
+ * @param {{ getCapturedText?: (page: import('puppeteer').Page) => Promise<Array<{text: string, x: number, y: number}>> }} [opts]
+ *   opts.getCapturedText — setupCanvasTextHook 返回的同名函数（支持随机 marker 名）；不传时降级读 window.__canvasCapturedText（旧行为，仅向后兼容）
  * @returns {Promise<{ source: 'api' | 'canvas', data: unknown }>} source 为 'api' 时 data 为 API 响应对象；为 'canvas' 时为 extractResumeText 的结果（字符串数组）
  */
-export async function getResumeData (page, interceptedData) {
+export async function getResumeData (page, interceptedData, opts = {}) {
   if (interceptedData && interceptedData.size > 0) {
     const firstEntry = interceptedData.entries().next()
     if (!firstEntry.done) {
@@ -360,12 +372,21 @@ export async function getResumeData (page, interceptedData) {
       return { source: 'api', data: { path, ...(typeof data === 'object' && data !== null ? data : { value: data }) } }
     }
   }
-  const captured = await page.evaluate(() => {
-    const arr = window.__canvasCapturedText || []
-    const copy = arr.map(({ text, x, y }) => ({ text, x, y }))
-    window.__canvasCapturedText = []
-    return copy
-  })
+
+  // Canvas fallback: use getCapturedText closure if provided (supports randomized marker names)
+  // Fall back to legacy window.__canvasCapturedText for callers that don't yet pass it
+  const getCapturedTextFn = opts.getCapturedText
+  let captured
+  if (typeof getCapturedTextFn === 'function') {
+    captured = await getCapturedTextFn(page)
+  } else {
+    captured = await page.evaluate(() => {
+      const arr = window.__canvasCapturedText || []
+      const copy = arr.map(({ text, x, y }) => ({ text, x, y }))
+      window.__canvasCapturedText = []
+      return copy
+    })
+  }
   const lines = extractResumeText(captured)
   return { source: 'canvas', data: lines }
 }

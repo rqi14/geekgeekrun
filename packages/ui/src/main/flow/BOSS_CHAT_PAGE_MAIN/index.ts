@@ -140,7 +140,7 @@ const runChatPage = async () => {
   log('正在动态 import boss package...')
   type BossAutoBrowseModule = {
     startBossChatPageProcess: (hooks: any, options?: {
-      browser?: any; page?: any; getCapturedText?: any; clearCapturedText?: any;
+      browser?: any; page?: any; getCapturedText?: any; clearCapturedText?: any; peekCapturedText?: any;
       jobId?: string | null;
       retryCandidate?: { encryptGeekId: string; geekName: string; jobTitle: string } | null;
       processContext?: { currentCandidate: any } | null;
@@ -207,6 +207,7 @@ const runChatPage = async () => {
   let page: any = null
   let getCapturedText: any = null
   let clearCapturedText: any = null
+  let peekCapturedText: any = null
   // processContext 提升到循环外，catch 块中可读取被中断的候选人
   const processContext: { currentCandidate: any } = { currentCandidate: null }
 
@@ -247,6 +248,13 @@ const runChatPage = async () => {
         const canvasHooks = await setupCanvasTextHook(page)
         getCapturedText = canvasHooks.getCapturedText
         clearCapturedText = canvasHooks.clearCapturedText
+        peekCapturedText = canvasHooks.peekCapturedText
+
+        const { randomizeInitialCursorPosition } = (await import(
+          '@geekgeekrun/boss-auto-browse-and-chat/humanMouse.mjs'
+        )) as any
+        await randomizeInitialCursorPosition(page).catch(() => {})
+
         if (Array.isArray(bossCookies) && bossCookies.length > 0) {
           await page.setCookie(...bossCookies)
         }
@@ -286,7 +294,7 @@ const runChatPage = async () => {
             const jname = job.jobName ?? job.name
             log(`开始处理职位 ${jid}（${jname}）的沟通页...`)
             processContext.currentCandidate = null
-            await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, jobId: jid, processContext })
+            await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, jobId: jid, processContext })
             log(`职位 ${jid} 沟通页处理完成`)
           }
         } else {
@@ -295,7 +303,7 @@ const runChatPage = async () => {
       } else {
         log('未配置职位队列，开始执行 startBossChatPageProcess（处理所有未读）...')
         processContext.currentCandidate = null
-        await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, processContext })
+        await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, processContext })
       }
       log('startBossChatPageProcess 完成')
 
@@ -317,6 +325,7 @@ const runChatPage = async () => {
       page = null
       getCapturedText = null
       clearCapturedText = null
+      peekCapturedText = null
       const rerunMs = cfg?.chatPage?.rerunIntervalMs ?? rerunInterval
       log(`下次运行将在 ${rerunMs}ms 后开始`)
       await sleep(rerunMs)
@@ -345,7 +354,7 @@ const runChatPage = async () => {
                 log(`🔄 正在重试被验证中断的候选人：${interruptedCandidate.geekName}...`)
                 try {
                   await startBossChatPageProcess(hooks, {
-                    browser, page, getCapturedText, clearCapturedText,
+                    browser, page, getCapturedText, clearCapturedText, peekCapturedText,
                     retryCandidate: interruptedCandidate,
                     processContext: { currentCandidate: null }
                   })
@@ -368,6 +377,7 @@ const runChatPage = async () => {
         page = null
         getCapturedText = null
         clearCapturedText = null
+        peekCapturedText = null
       }
       if (err instanceof Error) {
         if (err.message.includes('LOGIN_STATUS_INVALID')) {
