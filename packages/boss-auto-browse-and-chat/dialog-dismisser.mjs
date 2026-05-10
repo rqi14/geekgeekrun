@@ -42,7 +42,9 @@ function dismissInPageBody (closeTexts, closeGlyphs) {
   const isVisible = (el) => {
     if (!el || !el.getBoundingClientRect) return false
     const cs = getComputedStyle(el)
-    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return false
+    if (cs.visibility === 'hidden' || cs.display === 'none') return false
+    // opacity 既可能是 '0' 也可能是 '0.0'/'0.00' 等，用 parseFloat 兜底
+    if (parseFloat(cs.opacity) <= 0) return false
     const r = el.getBoundingClientRect()
     return r.width > 1 && r.height > 1
   }
@@ -50,26 +52,36 @@ function dismissInPageBody (closeTexts, closeGlyphs) {
   const vw = window.innerWidth
   const vh = window.innerHeight
 
-  // 1) 扫描所有 fixed/absolute 大面积浮层 —— 弹窗几乎都长这样
-  const overlays = []
-  const all = document.body ? document.body.querySelectorAll('*') : []
-  for (const el of all) {
-    if (!isVisible(el)) continue
-    const cs = getComputedStyle(el)
-    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue
-    const r = el.getBoundingClientRect()
-    // 至少占视口 5%（小通知不算 block，跳过）
-    const area = r.width * r.height
-    if (area < vw * vh * 0.05) continue
-    // 不是中央 / 顶部覆盖的也跳过（侧边栏 etc）
-    if (r.right < 0 || r.left > vw || r.bottom < 0 || r.top > vh) continue
-    const z = parseInt(cs.zIndex || '0', 10) || 0
-    const cls = (el.className && typeof el.className === 'string') ? el.className : (el.getAttribute && el.getAttribute('class')) || ''
-    const looksLikeDialog = /dialog|popup|modal|mask|overlay|drawer/i.test(cls)
-    if (z < 100 && !looksLikeDialog) continue
-    // 排除：业务流程主动打开、不该被自动关闭的 dialog（在线/附件简历预览、索取简历确认）
-    if (/resume-common-dialog|ask-for-resume-confirm|c-resume/i.test(cls)) continue
-    overlays.push({ el, z, area, looksLikeDialog })
+  // 1) 扫描候选浮层。先用窄选择器（CSS class/role 显式标记 dialog/popup 等的元素）；
+  //    命中即可避免对整页 querySelectorAll('*') 做样式计算 —— 在大型 SPA 上能省下 O(N) 的 getComputedStyle。
+  //    若窄查询过滤后仍为空，再回退到全量扫描（带元素数上限），覆盖无标记的 hand-rolled 浮层。
+  const NARROW_SEL = '[class*="dialog"],[class*="popup"],[class*="modal"],[class*="mask"],[class*="overlay"],[class*="drawer"],[role="dialog"],[role="alertdialog"]'
+  const FULL_SCAN_CAP = 5000
+  const collectFrom = (nodes) => {
+    const out = []
+    let scanned = 0
+    for (const el of nodes) {
+      if (++scanned > FULL_SCAN_CAP) break
+      if (!isVisible(el)) continue
+      const cs = getComputedStyle(el)
+      if (cs.position !== 'fixed' && cs.position !== 'absolute') continue
+      const r = el.getBoundingClientRect()
+      const area = r.width * r.height
+      if (area < vw * vh * 0.05) continue
+      if (r.right < 0 || r.left > vw || r.bottom < 0 || r.top > vh) continue
+      const z = parseInt(cs.zIndex || '0', 10) || 0
+      const cls = (el.className && typeof el.className === 'string') ? el.className : (el.getAttribute && el.getAttribute('class')) || ''
+      const looksLikeDialog = /dialog|popup|modal|mask|overlay|drawer/i.test(cls)
+      if (z < 100 && !looksLikeDialog) continue
+      // 排除：业务流程主动打开、不该被自动关闭的 dialog（在线/附件简历预览、索取简历确认）
+      if (/resume-common-dialog|ask-for-resume-confirm|c-resume/i.test(cls)) continue
+      out.push({ el, z, area, looksLikeDialog })
+    }
+    return out
+  }
+  let overlays = document.body ? collectFrom(document.body.querySelectorAll(NARROW_SEL)) : []
+  if (overlays.length === 0 && document.body) {
+    overlays = collectFrom(document.body.querySelectorAll('*'))
   }
 
   // 优先级：明显是 dialog 的 + z-index 高 + 面积大
@@ -182,16 +194,17 @@ export async function dismissBlockingOverlays (ctx, opts = {}) {
 }
 
 /**
- * 检查 (x, y) 视口坐标处的最顶层元素是否是 expectedEl 或其后代。
- * 若不是，说明被遮挡。返回遮挡元素的简要描述用于日志。
+ * 检查 (x, y) 处的最顶层元素是否是 expectedEl 或其后代。被其他元素遮挡返回 blocked=true。
  *
- * 注意 (x,y) 必须是 viewport 坐标（page-relative），调用方可通过
- * boundingBox() 拿到的就是 page-relative，配合 page.evaluate 内部用 elementFromPoint 即可。
+ * 坐标系：x/y 必须是 **viewport / client 坐标**（即 `document.elementFromPoint` 期望的坐标系，
+ * 与 `getBoundingClientRect()` 返回值一致）。Puppeteer 的 `ElementHandle.boundingBox()`
+ * 返回的也是 viewport-relative 坐标（与 `page.mouse.click` 接受的坐标系相同），所以可直接传入。
+ * 若调用方手头是 document/page 坐标（含 scroll 偏移），需先减去 `window.scrollX/scrollY`。
  *
  * @param {import('puppeteer').Page | import('puppeteer').Frame} ctx
  * @param {import('puppeteer').ElementHandle} expectedEl
- * @param {number} x
- * @param {number} y
+ * @param {number} x viewport x 坐标
+ * @param {number} y viewport y 坐标
  * @returns {Promise<{blocked: boolean, topTag?: string, topClass?: string}>}
  */
 export async function checkBlockedAt (ctx, expectedEl, x, y) {
@@ -231,7 +244,10 @@ export async function checkBlockedAt (ctx, expectedEl, x, y) {
  *   maxRetries?: number,
  *   logPrefix?: string
  * }} args
- * @returns {Promise<{ clicked: boolean, dismissedCount: number }>}
+ * @returns {Promise<{ clicked: boolean, dismissedCount: number, error?: string }>}
+ *   - clicked: 是否真正发出过一次成功的点击调用（cursor.click 或 element.click 未抛错）
+ *   - dismissedCount: 期间被启发式关掉的浮层数
+ *   - error: 失败原因（NO_BOUNDING_BOX_AND_CLICK_FAILED / BLOCKED_AND_DISMISS_FAILED / RETRY_EXHAUSTED 等）
  */
 export async function safeClickElement (args) {
   const { ctx, page, element, cursor, maxRetries = 3, logPrefix = '[safe-click]' } = args
@@ -240,16 +256,22 @@ export async function safeClickElement (args) {
     const box = await element.boundingBox().catch(() => null)
     if (!box) {
       logDebug(logPrefix, '元素无 boundingBox，回退到 element.click()')
-      await element.click().catch(() => {})
-      return { clicked: true, dismissedCount }
+      let ok = true
+      await element.click().catch((e) => {
+        ok = false
+        logDebug(logPrefix, 'element.click() 抛错：', e?.message)
+      })
+      return ok
+        ? { clicked: true, dismissedCount }
+        : { clicked: false, dismissedCount, error: 'NO_BOUNDING_BOX_AND_CLICK_FAILED' }
     }
     const cx = box.x + box.width / 2
     const cy = box.y + box.height / 2
 
-    // ctx 上的 elementFromPoint 用的是 ctx 自己的 viewport 坐标
-    // 当 ctx 是 page，box 已是 page-relative，可直接用
-    // 当 ctx 是 frame，box 是 page 坐标但 frame elementFromPoint 期待 frame 坐标
-    // —— 此处保守：仅当 ctx === page 时执行遮挡检测（iframe 内一般无遮挡，主页面才有全局弹窗）
+    // ctx 上的 elementFromPoint 用的是 ctx 自己的 viewport 坐标。
+    // 当 ctx === page，box 已是主页面 viewport 坐标，可直接传给 elementFromPoint。
+    // 当 ctx 是 frame，boundingBox 返回的是主页面 viewport 坐标但 frame 内 elementFromPoint
+    // 期待 frame 自己的坐标系——保守跳过遮挡检测（iframe 内罕见全局弹窗，主页面才是高发区）。
     const sameAsPage = ctx === page
     let blocked = { blocked: false }
     if (sameAsPage) {
@@ -261,20 +283,35 @@ export async function safeClickElement (args) {
       const n = await dismissBlockingOverlays(page)
       dismissedCount += n
       if (n === 0) {
-        logDebug(logPrefix, '未识别到可关闭的浮层，强制点击一次后返回')
-        await cursor.click({ x: cx, y: cy }).catch(() => {})
-        return { clicked: true, dismissedCount }
+        logDebug(logPrefix, '未识别到可关闭的浮层，强制点击一次后返回（成功率不保证）')
+        let ok = true
+        await cursor.click({ x: cx, y: cy }).catch((e) => {
+          ok = false
+          logDebug(logPrefix, 'cursor.click 抛错：', e?.message)
+        })
+        return ok
+          ? { clicked: true, dismissedCount, error: 'CLICKED_WHILE_BLOCKED' }
+          : { clicked: false, dismissedCount, error: 'BLOCKED_AND_DISMISS_FAILED' }
       }
       // 关闭后重试
       continue
     }
-    await cursor.click({ x: cx, y: cy })
-    return { clicked: true, dismissedCount }
+    let ok = true
+    await cursor.click({ x: cx, y: cy }).catch((e) => {
+      ok = false
+      logDebug(logPrefix, 'cursor.click 抛错：', e?.message)
+    })
+    if (ok) return { clicked: true, dismissedCount }
+    // cursor 点击失败也用 retry 兜底
   }
-  // 重试用尽，最后兜底直接点
+  // 重试用尽
   const box = await element.boundingBox().catch(() => null)
+  let ok = false
   if (box) {
-    await cursor.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 }).catch(() => {})
+    ok = true
+    await cursor.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 }).catch(() => { ok = false })
   }
-  return { clicked: true, dismissedCount }
+  return ok
+    ? { clicked: true, dismissedCount, error: 'RETRY_EXHAUSTED_BUT_FINAL_CLICK_OK' }
+    : { clicked: false, dismissedCount, error: 'RETRY_EXHAUSTED' }
 }

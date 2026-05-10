@@ -366,11 +366,13 @@ export async function startChatWithCandidate (frame, _candidate, _greetingMessag
     try {
       const knowBtn = await mainPage.waitForSelector(GREETING_SENT_KNOW_BTN_SELECTOR, { timeout: 6000 })
       if (knowBtn) {
-        await safeClickElement({
+        const r = await safeClickElement({
           ctx: mainPage, page: mainPage, element: knowBtn, cursor,
           logPrefix: '[chat-handler:greet-know]'
         })
-        handled = true
+        // 仅当真正点击成功时认为已处理；clicked=false 时落到下方启发式兜底
+        handled = r.clicked === true && !r.error
+        if (r.error) logWarn('[chat-handler] safeClickElement 报告 error=', r.error)
       }
       await sleepWithRandomDelay(500)
     } catch {
