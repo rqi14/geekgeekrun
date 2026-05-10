@@ -128,7 +128,14 @@ const isSavingQueue = ref(false)
 const loadJobsList = async () => {
   try {
     const result = await ipcRenderer.invoke('fetch-boss-jobs-config')
-    jobsList.value = result?.jobs ?? []
+    jobsList.value = (result?.jobs ?? []).map((j: any) => ({
+      ...j,
+      sequence: {
+        enabled: j.sequence?.enabled ?? true,
+        runRecommend: j.sequence?.runRecommend ?? true,
+        runChat: j.sequence?.runChat ?? true
+      }
+    }))
   } catch (err) {
     console.error(err)
   }

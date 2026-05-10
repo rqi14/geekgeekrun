@@ -174,7 +174,14 @@ const loadData = async () => {
     formContent.chatPage.runOnceAfterComplete = chatPage.runOnceAfterComplete ?? false
     formContent.chatPage.keepBrowserOpenAfterRun = chatPage.keepBrowserOpenAfterRun ?? false
     formContent.chatPage.rerunIntervalMs = chatPage.rerunIntervalMs ?? 3000
-    jobsList.value = jobsResult?.jobs ?? []
+    jobsList.value = (jobsResult?.jobs ?? []).map((j: any) => ({
+      ...j,
+      sequence: {
+        enabled: j.sequence?.enabled ?? true,
+        runRecommend: j.sequence?.runRecommend ?? true,
+        runChat: j.sequence?.runChat ?? true
+      }
+    }))
   } catch (err) {
     console.error(err)
   }
