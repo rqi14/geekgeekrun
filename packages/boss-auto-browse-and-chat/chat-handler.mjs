@@ -360,7 +360,9 @@ export async function startChatWithCandidate (frame, _candidate, _greetingMessag
   }
 
   // 2. 等待"已向牛人发送招呼"弹窗并点击"知道了"（弹窗在主页面，不在 iframe 内）
-  // 优先用 known selector；找不到则用启发式扫描兜底（应对弹窗结构变动）
+  // 优先用 known selector；找不到则用启发式扫描兜底（应对弹窗结构变动）。
+  // 若弹窗始终未出现（selector 超时 + 启发式也没关掉任何浮层），视为招呼可能未发出，
+  // 返回 GREETING_SENT_DIALOG_NOT_APPEARED 而非乐观地返回 OK，防止误计成功次数。
   if (GREETING_SENT_KNOW_BTN_SELECTOR) {
     let handled = false
     try {
@@ -376,14 +378,18 @@ export async function startChatWithCandidate (frame, _candidate, _greetingMessag
       }
       await sleepWithRandomDelay(500)
     } catch {
-      // 留给下面的启发式兜底
+      // selector 超时，留给启发式兜底
     }
     if (!handled) {
       const closed = await dismissBlockingOverlays(mainPage, { maxRounds: 2 }).catch(() => 0)
       if (closed > 0) {
         logInfo('[chat-handler] 启发式关闭了发送招呼后的浮层')
+        handled = true
       } else {
-        logWarn('[chat-handler] "知道了"弹窗未出现，继续尝试后续步骤')
+        // 弹窗既没有通过 selector 出现，也没有被启发式识别到——
+        // 不能确认招呼已发，提前返回失败，避免误报成功
+        logWarn('[chat-handler] 招呼确认弹窗（"知道了"）始终未出现，招呼可能未被发送')
+        return { success: false, reason: 'GREETING_SENT_DIALOG_NOT_APPEARED' }
       }
     }
   }

@@ -176,19 +176,39 @@ export async function tryDismissOneOverlay (ctx) {
 
 /**
  * 多次循环尝试关闭浮层（应对叠加 / 关一个出一个的情况）。
+ *
+ * 每次 click 后等 gapMs 再重新扫描：若下一轮扫到的是同一个浮层（signature 相同），
+ * 说明 click 没有触发关闭（可能是 disabled 按钮或事件被吞），记为一次"无进展"；
+ * 连续 2 次无进展则提前终止，避免无限点击失效按钮。
+ *
  * @param {import('puppeteer').Page | import('puppeteer').Frame} ctx
  * @param {{ maxRounds?: number, gapMs?: number }} [opts]
- * @returns {Promise<number>} 关闭的浮层数量
+ * @returns {Promise<number>} 成功关闭的浮层数量
  */
 export async function dismissBlockingOverlays (ctx, opts = {}) {
   const maxRounds = opts.maxRounds ?? 3
   const gapMs = opts.gapMs ?? 350
   let count = 0
+  let staleSig = null   // 上一轮被点击但可能未关掉的浮层 signature
+  let staleCount = 0    // 连续无进展次数
   for (let i = 0; i < maxRounds; i++) {
     const r = await tryDismissOneOverlay(ctx)
     if (!r.dismissed) break
-    count++
     await sleep(gapMs)
+    // 检查是否真正消失：若 signature 与上轮相同，视为 click 无效
+    if (r.overlaySignature && r.overlaySignature === staleSig) {
+      staleCount++
+      logDebug('[dialog-dismisser] 浮层', r.overlaySignature, '点击后仍存在（staleCount=', staleCount, '）')
+      if (staleCount >= 2) {
+        logInfo('[dialog-dismisser] 浮层', r.overlaySignature, '连续 2 次点击无效，终止重试')
+        break
+      }
+    } else {
+      // 新出现的浮层（或浮层已关且另一个冒出），重置计数
+      staleSig = r.overlaySignature
+      staleCount = 0
+      count++
+    }
   }
   return count
 }
