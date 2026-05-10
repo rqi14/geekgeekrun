@@ -7,7 +7,7 @@ export const osPlatformToBuildCommandMap = {
   win32: 'win'
 }
 export const buildTargetListMapByPlatform = {
-  darwin: ['dmg'],
-  linux: ['deb'],
-  win32: ['nsis']
+  darwin: ['zip'],
+  linux: ['AppImage'],
+  win32: ['portable']
 }
