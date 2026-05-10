@@ -13,7 +13,7 @@
       text-transform: uppercase;
       padding: 0.6em 0 0.15em 1em;
       margin-top: 0.2em;
-      &:first-child {
+      &:first-of-type {
         margin-top: 0;
         padding-top: 0.15em;
       }

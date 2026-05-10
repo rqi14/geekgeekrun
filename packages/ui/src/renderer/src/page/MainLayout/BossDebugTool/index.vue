@@ -47,7 +47,7 @@
         </el-tab-pane>
 
         <!-- ── Tab B: LLM 筛选 ── -->
-        <el-tab-pane label="LLM 筛选测试（无需浏览器）" name="llm">
+        <el-tab-pane label="LLM 筛选测试（区域1/3 无需浏览器）" name="llm">
 
           <!-- 区域 1：生成 Rubric（工作流起点） -->
           <el-card class="section">

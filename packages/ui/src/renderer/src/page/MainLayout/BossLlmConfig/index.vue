@@ -34,7 +34,7 @@
         </el-form-item>
       </div>
       <el-alert
-        v-if="allEnabledModels.length === 0"
+        v-if="!isLoading && allEnabledModels.length === 0"
         type="info"
         show-icon
         :closable="false"
@@ -226,6 +226,7 @@ interface ProviderEntry {
 const providers = ref<ProviderEntry[]>([])
 const purposeDefaultModelId = ref<Record<string, string>>({})
 const isSaving = ref(false)
+const isLoading = ref(true)
 
 const purposes = [
   { key: 'resume_screening', label: '简历筛选' },
@@ -322,6 +323,8 @@ onMounted(async () => {
     purposeDefaultModelId.value = config?.purposeDefaultModelId ?? {}
   } catch (err) {
     console.error('[BossLlmConfig] 加载配置失败', err)
+  } finally {
+    isLoading.value = false
   }
 })
 
