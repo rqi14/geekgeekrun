@@ -255,7 +255,8 @@ const runChatPage = async () => {
         )) as any
         await randomizeInitialCursorPosition(page).catch(() => {})
 
-        if (Array.isArray(bossCookies) && bossCookies.length > 0) {
+        // persistProfile=true 时 profile 已持久化 cookies，跳过注入避免用过期文件覆盖有效 session
+        if (!launchOpts.userDataDir && Array.isArray(bossCookies) && bossCookies.length > 0) {
           await page.setCookie(...bossCookies)
         }
         await setDomainLocalStorage(browser, localStoragePageUrl, bossLocalStorage || {})
