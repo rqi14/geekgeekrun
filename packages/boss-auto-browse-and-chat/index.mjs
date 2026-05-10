@@ -112,7 +112,8 @@ export async function launchBrowserAndNavigateToChat () {
   await randomizeInitialCursorPosition(page).catch(() => {})
   const bossCookies = readStorageFile('boss-cookies.json')
   const bossLocalStorage = readStorageFile('boss-local-storage.json')
-  if (Array.isArray(bossCookies) && bossCookies.length > 0) {
+  // persistProfile=true 时 profile 已持久化 cookies，跳过注入避免用过期文件覆盖有效 session
+  if (!launchOpts.userDataDir && Array.isArray(bossCookies) && bossCookies.length > 0) {
     await page.setCookie(...bossCookies)
   }
   await setDomainLocalStorage(browser, localStoragePageUrl, bossLocalStorage || {})
@@ -264,7 +265,9 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     // 直接导航到推荐牛人页（注入 Cookie / localStorage 后 goto；复用浏览器时若已在推荐页可跳过 goto）
     // -----------------------------------------------------------------------
     await hooks.beforeNavigateToRecommend?.promise?.()
-    if (Array.isArray(bossCookies) && bossCookies.length > 0) {
+    // persistProfile=true 时 profile 已持久化 cookies，跳过注入避免用过期文件覆盖有效 session
+    const persistProfile = (readConfigFile('boss-recruiter.json') || {})?.advanced?.persistProfile === true
+    if (!persistProfile && Array.isArray(bossCookies) && bossCookies.length > 0) {
       await page.setCookie(...bossCookies)
     }
     await setDomainLocalStorage(browser, localStoragePageUrl, bossLocalStorage || {})
@@ -572,10 +575,8 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
         }
 
         // 每位候选人处理完都做一次 checkpoint：检测到验证则在循环内等待用户完成，避免崩出 catch + 3s 重试导致连环触发
-        const cpStatus = await checkpointRiskControl(page, {
-          expectedUrlPrefix: BOSS_RECOMMEND_PAGE_URL,
-          log: logWarn
-        })
+        // 不传 expectedUrlPrefix：仅依赖 !detectRiskControl 判断完成，避免 URL query-params 导致误判超时
+        const cpStatus = await checkpointRiskControl(page, { log: logWarn })
         if (cpStatus === 'timed-out') break mainLoop
       }
 

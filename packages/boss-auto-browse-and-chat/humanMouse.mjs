@@ -114,9 +114,10 @@ export async function createHumanCursor (page) {
     async click (selectorOrPos) {
       const pos = await resolvePos(selectorOrPos)
       if (Math.random() < 0.5) {
+        const vp = page.viewport() || { width: 1280, height: 720 }
         const overshoot = {
-          x: pos.x + (Math.random() * 60 - 30),
-          y: pos.y + (Math.random() * 30 - 15)
+          x: Math.max(1, Math.min(vp.width - 1, pos.x + (Math.random() * 60 - 30))),
+          y: Math.max(1, Math.min(vp.height - 1, pos.y + (Math.random() * 30 - 15)))
         }
         await cursor.moveTo(overshoot)
       }

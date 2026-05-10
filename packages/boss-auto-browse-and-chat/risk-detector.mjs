@@ -33,7 +33,7 @@ export async function detectRiskControl(page) {
       if (hasVerifyEl) return true
       const bodyText = document.body?.innerText || ''
       const hasVerifyText =
-        /请完成.{0,10}验证|安全验证|滑动.{0,6}滑块|人机验证|完成验证后继续|异常.{0,6}操作|验证码/.test(
+        /请完成.{0,10}验证|安全验证|滑动.{0,6}滑块|人机验证|完成验证后继续|异常.{0,6}操作/.test(
           bodyText
         )
       return hasVerifyText
