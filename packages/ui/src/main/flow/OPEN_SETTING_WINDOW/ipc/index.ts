@@ -1376,7 +1376,7 @@ export default function initIpc() {
             } else if (fileName === 'boss-jobs-config.json') {
               await writeBossJobsConfig(backup[fileName] ?? { jobs: [] })
             } else if (fileName === 'boss-llm.json') {
-              await writeBossLlmConfig(backup[fileName])
+              await writeBossLlmConfig(backup[fileName] ?? { providers: [] })
             } else {
               await writeBossConfigFile(fileName, backup[fileName])
             }

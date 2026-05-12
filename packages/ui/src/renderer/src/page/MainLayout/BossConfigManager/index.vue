@@ -226,6 +226,7 @@ async function runPreview(json: string) {
     for (const item of result.summary) {
       newSelected[item.key] = item.key !== 'session'
     }
+    for (const k of Object.keys(importSelected)) delete importSelected[k]
     Object.assign(importSelected, newSelected)
     previewState.value = 'ready'
   } catch (err: any) {
