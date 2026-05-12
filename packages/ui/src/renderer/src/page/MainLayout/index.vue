@@ -140,7 +140,8 @@ const RECRUITER_ROUTES = [
   'BossAutoSequence',
   'WebhookIntegration',
   'BossDebugTool',
-  'BossLlmConfig'
+  'BossLlmConfig',
+  'BossConfigManager'
 ]
 
 function getIdentityFromRoute(routeName: string | null | symbol): 'geek' | 'recruiter' {
