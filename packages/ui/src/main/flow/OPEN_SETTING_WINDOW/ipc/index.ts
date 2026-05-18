@@ -1186,7 +1186,7 @@ export default function initIpc() {
     }
 
     if (payload.sections.llm) {
-      const llmConfig = readBossLlmConfig()
+      const llmConfig = JSON.parse(JSON.stringify(readBossLlmConfig()))
       if (!payload.sections.includeApiKeys && Array.isArray(llmConfig.providers)) {
         llmConfig.providers = llmConfig.providers.map((p: any) => ({ ...p, apiKey: '__REDACTED__' }))
       }
@@ -1194,7 +1194,10 @@ export default function initIpc() {
     }
 
     if (payload.sections.webhook) {
-      bundle.sections.webhook = readBossConfigFile('webhook.json') ?? {}
+      const webhookConfig = readBossConfigFile('webhook.json')
+      if (webhookConfig && Object.keys(webhookConfig).length > 0) {
+        bundle.sections.webhook = webhookConfig
+      }
     }
 
     if (payload.sections.session) {
@@ -1231,7 +1234,9 @@ export default function initIpc() {
       return { valid: false, error: `不支持的配置文件版本: ${bundle.version}` }
     }
 
-    const sections = bundle.sections || {}
+    const sections = bundle.sections && typeof bundle.sections === 'object' && !Array.isArray(bundle.sections)
+      ? bundle.sections
+      : {}
     const summary: Array<{
       key: string
       label: string
@@ -1298,8 +1303,14 @@ export default function initIpc() {
       return { success: false, error: `不支持的配置文件版本: ${bundle.version}` }
     }
 
-    const selected = new Set(payload.selectedSections)
-    const sections = bundle.sections || {}
+    const KNOWN_SECTIONS = new Set(['recruiter', 'jobs', 'llm', 'webhook', 'session'])
+    const selected = new Set(payload.selectedSections.filter((s) => KNOWN_SECTIONS.has(s)))
+    if (selected.size === 0) {
+      return { success: false, error: '未选择任何有效的导入项' }
+    }
+    const sections = bundle.sections && typeof bundle.sections === 'object' && !Array.isArray(bundle.sections)
+      ? bundle.sections
+      : {}
 
     // Backup existing configs before writing
     const backup: Record<string, any> = {}
@@ -1382,10 +1393,14 @@ export default function initIpc() {
             }
           }
         }
-      } catch {
-        // ignore rollback errors
+      } catch (rollbackErr: any) {
+        console.error('[import-recruiter-config] 回滚失败，配置可能处于部分写入状态:', rollbackErr)
+        return {
+          success: false,
+          error: `导入失败且回滚异常，请手动检查配置文件。导入错误: ${err?.message ?? '未知错误'}`
+        }
       }
-      return { success: false, error: err?.message ?? '导入失败，已还原至原始配置' }
+      return { success: false, error: `导入失败，已还原至原始配置。错误: ${err?.message ?? '未知错误'}` }
     }
   })
 
