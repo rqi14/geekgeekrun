@@ -24,7 +24,7 @@ export function classifyState (s) {
   if (s.verify) return STATES.VERIFY
   if (has(s.frameOverlayClasses, 'dialog-lib-resume')) return STATES.RESUME_MODAL
   if (has(s.frameOverlayClasses, 'card-reason-f1')) return STATES.LIST_REASON_PANEL
-  if (has(s.mainOverlayClasses, 'dialog-wrap') && /选择原因|提交/.test(s.mainText || '')) return STATES.RESUME_REJECT_DIALOG
+  if (has(s.mainOverlayClasses, 'dialog-wrap') && /选择原因/.test(s.mainText || '')) return STATES.RESUME_REJECT_DIALOG
   if (has(s.mainOverlayClasses, 'dialog-uninstall-extension')) return STATES.GOVERNANCE_NOTICE
   if (QUOTA_BLOCKED_TEXT_REGEXP.test(s.mainText || '')) return STATES.QUOTA_BLOCKED
   if (s.frameHasList) return STATES.LIST

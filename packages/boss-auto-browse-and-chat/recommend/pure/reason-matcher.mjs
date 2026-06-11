@@ -15,5 +15,5 @@ export function fuzzyReason (internalReason, optionTexts, fallback) {
   }
   const fb = optionTexts.find((t) => t.includes(fallback))
   if (fb) return fb
-  return fallback
+  return optionTexts[0] ?? fallback
 }

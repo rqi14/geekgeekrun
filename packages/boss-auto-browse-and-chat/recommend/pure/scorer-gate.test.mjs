@@ -29,3 +29,8 @@ test('mergeScore: normal llm score passes through', () => {
   assert.equal(m.score, 75)
   assert.equal(m.hardReject, false)
 })
+test('mergeScore: skip stays below threshold even when minScoreToChat is 0', () => {
+  const m = mergeScore({ result: 'pass' }, null, { minScoreToChat: 0, onScoreError: 'skip' })
+  assert.ok(m.score < 0)
+  assert.equal(m.hardReject, false)
+})

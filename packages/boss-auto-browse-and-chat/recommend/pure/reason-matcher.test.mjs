@@ -22,5 +22,5 @@ test('unknown reason → fallback', () => {
   assert.equal(fuzzyReason('zzz', OPTIONS, FALLBACK), '其他原因')
 })
 test('no option matches → fallback', () => {
-  assert.equal(fuzzyReason('city', ['仅这一个'], FALLBACK), '仅这一个'.includes('距离远') ? '仅这一个' : FALLBACK)
+  assert.equal(fuzzyReason('city', ['仅这一个'], FALLBACK), '仅这一个')
 })

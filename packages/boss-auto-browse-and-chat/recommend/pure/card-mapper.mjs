@@ -12,7 +12,7 @@ export function mapRawCard (raw) {
     salary: raw.salary ?? null,
     activeText: raw.activeText ?? '',
     age: baseInfo.find((s) => /岁/.test(s)) ?? null,
-    workExp: baseInfo.find((s) => /年|经验不限/.test(s)) ?? null,
+    workExp: baseInfo.find((s) => (/年|经验不限/.test(s)) && !/应届/.test(s)) ?? null,
     education: baseInfo.find((s) => DEGREE_RE.test(s)) ?? null,
     city: expect[0] ?? null,
     jobTitle: expect[1] ?? null,

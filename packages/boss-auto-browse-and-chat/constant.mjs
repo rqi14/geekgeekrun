@@ -103,8 +103,8 @@ export const NOT_INTERESTED_FUZZY_RULES = {
   blockName: ['其他原因']
 }
 
-/** @deprecated 用 RESUME_MODAL_CLOSE_SELECTOR；旧值查主页面、对 iframe 内简历弹窗无效 */
-export const RESUME_POPUP_CLOSE_SELECTOR = RESUME_MODAL_CLOSE_SELECTOR
+/** @deprecated 推荐页简历弹窗在 iframe 内，关闭用 RESUME_MODAL_CLOSE_SELECTOR；此主页面选择器仅保留给旧沟通页路径 */
+export const RESUME_POPUP_CLOSE_SELECTOR = 'div.boss-popup__close'
 
 /** @deprecated 招呼为自动发送，无需弹窗输入框；若需在弹窗内编辑招呼语可再用 */
 export const GREETING_DIALOG_SELECTOR = 'body > div.dialog-wrap.dialog-chat-greeting.v-transfer-dom > div.dialog-container'

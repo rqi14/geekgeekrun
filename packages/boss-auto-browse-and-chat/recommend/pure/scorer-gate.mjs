@@ -22,7 +22,7 @@ export function mergeScore (gate, llm, cfg) {
     return { score: 0, reason: gate.reason, hardReject: true }
   }
   if (llm == null) {
-    const score = cfg.onScoreError === 'greetIfRulePass' ? cfg.minScoreToChat : Math.max(0, cfg.minScoreToChat - 1)
+    const score = cfg.onScoreError === 'greetIfRulePass' ? cfg.minScoreToChat : cfg.minScoreToChat - 1
     return { score, reason: 'llm-error', hardReject: false }
   }
   return { score: llm.score, reason: llm.reason ?? '', hardReject: false }
