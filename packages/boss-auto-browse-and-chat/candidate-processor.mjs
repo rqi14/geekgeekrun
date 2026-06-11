@@ -344,6 +344,8 @@ export function filterCandidates (candidates, filterConfig) {
 }
 
 /**
+ * @deprecated 推荐页已改用 recommend/orchestrator 的有上限 scrollGently；无界滚动会触发账号风控
+ *   （见 memory/recommend-scroll-ban.md 与 docs/superpowers/specs/2026-06-11-...）。保留导出以防外部引用。
  * 滚动页面以加载更多候选人；检测是否已到底部（如“没有更多”提示）。
  * 使用拟人滚轮：page.mouse.wheel() 小步、随机延迟，替代一次性 window.scrollBy，以规避 BOSS 滚动埋点。
  *
