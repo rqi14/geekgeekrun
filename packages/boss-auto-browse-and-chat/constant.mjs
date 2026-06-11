@@ -70,8 +70,41 @@ export const NOT_INTERESTED_REASON_FALLBACK = '其他原因'
 /** 原因弹窗的关闭图标（未匹配到原因时点击以关闭弹窗，避免卡住后续操作） */
 export const NOT_INTERESTED_REASON_POPUP_CLOSE_SELECTOR = 'div.card-reason-f1.show div.close-icon'
 
-/** 推荐页：简历详情弹窗的关闭按钮（主页面，非 iframe 内） */
-export const RESUME_POPUP_CLOSE_SELECTOR = 'div.boss-popup__close'
+// ── 推荐牛人页重构 v2 选择器（对照 dev/snapshots/ 校验） ──
+
+/** 主候选卡：li.card-item 内的主卡 card-inner（带 data-geek）。排除 similar-geek-wrap/quick-top。 */
+export const PRIMARY_CARD_INNER_SELECTOR = 'li.card-item > div.candidate-card-wrap > div.card-inner[data-geek]'
+/** li.card-item 内若含此元素则为"相似推荐"块，整条跳过 */
+export const SIMILAR_WRAP_SELECTOR = 'div.similar-geek-wrap'
+
+/** 简历弹窗（recommendFrame 内）容器 */
+export const RESUME_MODAL_SELECTOR = 'div.dialog-wrap.active .dialog-lib-resume'
+/** 简历弹窗内"打招呼"按钮 */
+export const RESUME_GREET_BTN_SELECTOR = '.button-chat-wrap.resumeGreet button.btn-greet'
+/** 简历弹窗内打招呼成功信号（按钮变"继续沟通"） */
+export const RESUME_GREET_DONE_SELECTOR = '.button-chat-wrap .btn-continue-wrap, .button-chat-wrap button.btn-outline-v2'
+/** 简历弹窗内"经历概览"文本容器 */
+export const RESUME_SUMMARY_SELECTOR = '.resume-right-side .resume-summary'
+/** 简历弹窗关闭按钮（在 recommendFrame 内的弹窗上，非主页面） */
+export const RESUME_MODAL_CLOSE_SELECTOR = 'div.dialog-wrap.active .dialog-lib-resume .close-btn'
+
+/** 账号封禁文案（不可恢复 → 中止）。真机需再核对精确字符串。 */
+export const ACCOUNT_BANNED_TEXT_REGEXP = /账号.*不可使用|不可使用状态|登录\s*BOSS直聘手机APP查看详情/
+/** 今日额度用尽文案 */
+export const QUOTA_BLOCKED_TEXT_REGEXP = /今日.*(招呼|沟通).*上限|已达上限|超过.*上限/
+
+/** 模糊原因规则：internalReason → 选项文案需包含的子串（按序取第一个命中的选项；都不中用 NOT_INTERESTED_REASON_FALLBACK） */
+export const NOT_INTERESTED_FUZZY_RULES = {
+  city: ['距离远'],
+  education: ['不考虑'],
+  workExp: ['与职位不符', '工作经历'],
+  skills: ['与职位不符', '工作经历'],
+  viewed: ['重复推荐'],
+  blockName: ['其他原因']
+}
+
+/** @deprecated 用 RESUME_MODAL_CLOSE_SELECTOR；旧值查主页面、对 iframe 内简历弹窗无效 */
+export const RESUME_POPUP_CLOSE_SELECTOR = RESUME_MODAL_CLOSE_SELECTOR
 
 /** @deprecated 招呼为自动发送，无需弹窗输入框；若需在弹窗内编辑招呼语可再用 */
 export const GREETING_DIALOG_SELECTOR = 'body > div.dialog-wrap.dialog-chat-greeting.v-transfer-dom > div.dialog-container'
