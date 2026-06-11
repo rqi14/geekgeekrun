@@ -80,6 +80,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       }
       if (!await assertIdentity(frame, c.geekName)) {
         await closeResume(page, frame, cursor)
+        seen.add(c.encryptGeekId)
+        newCount++
         continue
       }
       const resume = await readSummary(frame)

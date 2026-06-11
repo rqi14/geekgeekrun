@@ -99,6 +99,7 @@ export const NOT_INTERESTED_FUZZY_RULES = {
   education: ['不考虑'],
   workExp: ['与职位不符', '工作经历'],
   skills: ['与职位不符', '工作经历'],
+  salary: ['薪资'],
   viewed: ['重复推荐'],
   blockName: ['其他原因']
 }

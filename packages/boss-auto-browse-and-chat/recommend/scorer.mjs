@@ -43,7 +43,7 @@ export function buildResumeText(candidate, resume) {
     candidate?.education && `学历：${candidate.education}`,
     candidate?.workExp && `经验：${candidate.workExp}`,
     candidate?.city && `期望城市：${candidate.city}`,
-    candidate?.jobTitle && `期望职位：${candidate.jobTitle}`,
+    candidate?.jobTitle && `期望行业：${candidate.jobTitle}`,
     candidate?.salary && `期望薪资：${candidate.salary}`,
     candidate?.skills && `优势：${candidate.skills}`,
     Array.isArray(candidate?.tags) && candidate.tags.length && `标签：${candidate.tags.join('、')}`,
