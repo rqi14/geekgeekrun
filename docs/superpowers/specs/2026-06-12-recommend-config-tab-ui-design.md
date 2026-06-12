@@ -39,12 +39,17 @@
 - `autoChat`: `greetingMessage` `maxChatPerRun` `delayBetweenChats`
 - `advanced.persistProfile: boolean`、`logLevel`
 
-## 3. 后端需要的两处补丁(small, additive, tested)
+## 3. 后端需要的补丁(small, additive, tested) — 含 codex 评审修正
 
-1. **`save-boss-recruiter-config` IPC**(`packages/ui/src/main/flow/OPEN_SETTING_WINDOW/ipc/index.ts:954`)：现仅透传 8 个 candidate-filter 字段，**不含** `expectSchoolKeywords` / `expectMajorKeywords`，且**没有 `scoring` 透传**。补：用 `hasOwn` 守卫追加这两个 filter 字段到 `candidate-filter.json`，并追加 `scoring` 合并到 `boss-recruiter.json`。纯追加，不动既有键。
-2. **`jobFilterToCandidateFilter`**(`runtime-file-utils.mjs:165`)：per-job 模式硬编码丢弃 `expectSkillKeywords/School/Major/blockName`。补：透传这些字段(若 jobFilter 带 `*Enabled` 则按开关，否则原样)。附单测。**v1 UI 走 global 路径**，此补丁只为防止 per-job 静默丢字段。
+1. **`save-boss-recruiter-config` IPC**(`packages/ui/src/main/flow/OPEN_SETTING_WINDOW/ipc/index.ts:954`)：现仅透传 8 个 candidate-filter 字段，**不含** `expectSchoolKeywords` / `expectMajorKeywords`，且**没有 `scoring` 透传**。补：用 `hasOwn` 守卫追加这两个 filter 字段到 `candidate-filter.json`，并把 `payload.scoring` 合并进 `bossRecruiterConfig.scoring`(scoring 由 index.mjs 从 `boss-recruiter.json` 读，**必须落 boss-recruiter.json**)。纯追加，不动既有键。
+2. **`jobFilterToCandidateFilter`**(`runtime-file-utils.mjs:165`)：per-job 模式硬编码丢弃 `expectSkillKeywords` / `blockCandidateNameRegExpStr` / `skipViewedCandidates`，且从不映射 school/major。补：透传**所有** candidate-filter 键(skills / school / major / blockName / skipViewed)，带 `*Enabled` 则按开关、否则原样回退。附单测。防止 per-job 静默丢字段。
+3. **`runRecommendLoop` 的 `clickNotInterestedForFiltered` 守卫**(`recommend/orchestrator.mjs:64-70`、`95`)：当前对初筛/hardReject 拒绝者**只要 X 预算>0 就无条件 X**。`recommendPage.clickNotInterestedForFiltered` 与 `delayBetweenNotInterestedMs` 这两个旧键在新 loop 里是**死键**(codex #4)。补：在两处 `rejectFromList` 前加 `if (cfg.clickNotInterestedForFiltered === false) { seen.add; continue }` 守卫(不点 X，仅跳过)。附单测。`delayBetweenNotInterestedMs` **不在 UI 暴露**(X 已被 `delayBetweenActionsMs` 节流，冗余)。
 
-> **假设/已知限制**：v1 配置作用于 **global 路径**(运行推荐牛人时不指定 jobId 即生效，是默认常见用法)。per-job 队列(`boss-jobs-config.json`)仍走旧 `BossJobConfig`；统一 per-job 与 global 两套 filter schema 留作后续(范围太大，不在本次)。
+> **假设/已知限制(codex #2/#5 修正)**：
+> - orchestrator 的 `recCfg.rules` 来自**两条路径**：① **recommend-only 单跑**(`run-boss-recommend` → 无 jobId)走 **global** `candidate-filter.json` —— 本页字段在此路径**直接生效**；② **组合/顺序执行**(`BOSS_AUTO_BROWSE_AND_CHAT_MAIN` 对每个启用的 sequence job 传 `jobId`)走 `getMergedJobConfig(jobId)` → 用 per-job filter **替换** global。
+> - 因此本页加 **sequence-mode 守卫**：加载时读 `boss-jobs-config.json`，若存在"启用的 sequence job"，在页顶显示 `el-alert`：本页(global)筛选仅对"推荐牛人单跑"生效；顺序执行模式下由 per-job 配置(旧 `BossJobConfig`)决定(配合补丁 2，school/major 不再被丢)。
+> - `recommendPage.runOnceAfterComplete` / `rerunIntervalMs` / `keepBrowserOpenAfterRun` 仅 **recommend-only 单跑**(`BOSS_RECOMMEND_MAIN`)读取；组合 worker 不读。UI 中归入"推荐牛人单跑生效"分组并标注。
+> - 统一 per-job 与 global 两套 filter schema 留作后续(范围太大，不在本次)。
 
 ## 4. 页面结构 — 4 个 Tab 对应流程阶段
 
@@ -89,10 +94,12 @@
 - 顶部醒目 `el-alert`(warning)：从前激进滚动导致封号；这些上限是自我约束，**调小更安全**。
 
 ### Tab ④ 执行
-- `recommendPage.clickNotInterestedForFiltered`(对初筛拒绝者点不感兴趣)
-- `recommendPage.runOnceAfterComplete` + `rerunIntervalMs`
-- `recommendPage.keepBrowserOpenAfterRun`、`advanced.persistProfile`(带风险说明)
+- `recommendPage.clickNotInterestedForFiltered`(对初筛拒绝者是否点不感兴趣；关=只跳过不 X)——**靠补丁 3 在 loop 内生效**
+- 分组「仅推荐牛人单跑生效」(标注)：`recommendPage.runOnceAfterComplete` + `rerunIntervalMs`、`keepBrowserOpenAfterRun`
+- `advanced.persistProfile`(带风险说明)
+- sequence-mode 守卫 `el-alert`(见 §3)：检测到启用的 sequence job 时提示 global 筛选仅单跑生效
 - 操作：`run-boss-auto-browse-and-chat` / `stop-...`，`RunningOverlay` 显示状态。
+- (不暴露 `delayBetweenNotInterestedMs`——新 loop 不读，X 已由 `delayBetweenActionsMs` 节流)
 
 ## 5. 组件拆分(每文件单一职责)
 
