@@ -10,20 +10,45 @@
     <el-card class="config-section">
       <div class="section-title">每轮上限</div>
       <el-form-item label="每轮最多打招呼人数">
-        <el-input-number v-model="model.maxGreetPerRun" :min="0" controls-position="right" />
+        <el-input-number
+          v-model="model.maxGreetPerRun"
+          :min="0"
+          :value-on-clear="0"
+          controls-position="right"
+        />
       </el-form-item>
       <el-form-item label="每轮最多 X（不感兴趣）人数">
-        <el-input-number v-model="model.maxXPerRun" :min="0" controls-position="right" />
+        <el-input-number
+          v-model="model.maxXPerRun"
+          :min="0"
+          :value-on-clear="0"
+          controls-position="right"
+        />
       </el-form-item>
       <el-form-item label="每轮最多滚动步数（唯一滚动点）">
-        <el-input-number v-model="model.maxScrollSteps" :min="0" controls-position="right" />
+        <el-input-number
+          v-model="model.maxScrollSteps"
+          :min="0"
+          :value-on-clear="0"
+          controls-position="right"
+        />
         <div class="form-tip">滚动越少越安全。</div>
       </el-form-item>
       <el-form-item label="最多连续空波次数">
-        <el-input-number v-model="model.maxStaleWaves" :min="0" controls-position="right" />
+        <el-input-number
+          v-model="model.maxStaleWaves"
+          :min="0"
+          :value-on-clear="0"
+          controls-position="right"
+        />
       </el-form-item>
       <el-form-item label="每波处理候选人数（waveSize）">
-        <el-input-number v-model="model.waveSize" :min="1" controls-position="right" />
+        <el-input-number
+          v-model="model.waveSize"
+          :min="1"
+          :value-on-clear="1"
+          controls-position="right"
+        />
       </el-form-item>
     </el-card>
 
@@ -34,6 +59,7 @@
           <el-input-number
             v-model="model.scrollDelayMsRange[0]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最小"
           />
@@ -41,6 +67,7 @@
           <el-input-number
             v-model="model.scrollDelayMsRange[1]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最大"
           />
@@ -51,6 +78,7 @@
           <el-input-number
             v-model="model.delayBetweenActionsMs[0]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最小"
           />
@@ -58,6 +86,7 @@
           <el-input-number
             v-model="model.delayBetweenActionsMs[1]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最大"
           />
@@ -65,20 +94,9 @@
       </el-form-item>
     </el-card>
 
-    <el-card class="config-section">
-      <div class="section-title">招呼语</div>
-      <el-form-item label="招呼语">
-        <el-input
-          v-model="model.greetingMessage"
-          type="textarea"
-          :autosize="{ minRows: 2 }"
-          placeholder="向候选人发送的第一条消息"
-        />
-      </el-form-item>
-      <el-form-item label="每轮最多开聊人数">
-        <el-input-number v-model="model.maxChatPerRun" :min="0" controls-position="right" />
-      </el-form-item>
-    </el-card>
+    <div class="footnote">
+      招呼语在「{{ '招聘端 > 推荐牛人(旧版)' }}」或职位配置里设置；本页只管"打给谁、打多少"。
+    </div>
   </el-form>
 </template>
 
@@ -108,6 +126,13 @@ const model = defineModel<BudgetState>({ required: true })
 
 .mb16 {
   margin-bottom: 16px;
+}
+
+.footnote {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
 }
 
 .range-input-wrap {

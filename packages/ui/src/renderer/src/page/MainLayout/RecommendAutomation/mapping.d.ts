@@ -29,8 +29,6 @@ export interface BudgetState {
   maxStaleWaves: number
   scrollDelayMsRange: [number, number]
   delayBetweenActionsMs: [number, number]
-  greetingMessage: string
-  maxChatPerRun: number
 }
 
 export interface RunState {
@@ -64,8 +62,7 @@ export const DEFAULTS: {
   minScoreToChat: number
   onScoreError: 'skip' | 'greetIfRulePass'
   rerunIntervalMs: number
-  maxChatPerRun: number
 }
 
-export function normalizeRecommendConfig (raw: RawConfigInput): RecommendConfigState
-export function toSavePayload (s: RecommendConfigState): Record<string, unknown>
+export function normalizeRecommendConfig(raw: RawConfigInput): RecommendConfigState
+export function toSavePayload(s: RecommendConfigState): Record<string, unknown>

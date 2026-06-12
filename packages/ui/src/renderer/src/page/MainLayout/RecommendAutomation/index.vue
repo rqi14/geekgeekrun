@@ -1,7 +1,7 @@
 <template>
   <div class="recommend-automation__wrap">
     <div class="main__wrap">
-      <el-tabs v-model="activeTab" type="border-card">
+      <el-tabs v-if="loaded" v-model="activeTab" type="border-card">
         <el-tab-pane label="职位&评分" name="scoring">
           <ScoringTab v-model="state.scoring" :models="models" />
         </el-tab-pane>
@@ -15,12 +15,24 @@
           <RunTab v-model="state.run" :sequence-jobs-enabled="sequenceJobsEnabled" />
         </el-tab-pane>
       </el-tabs>
+      <div v-else class="loading-placeholder">配置加载中…</div>
+
+      <div v-if="regexError" class="regex-warn">
+        筛选条件中存在无效正则（学历或屏蔽姓名），请修正后再保存：{{ regexError }}
+      </div>
 
       <div class="flow-hint">流程：卡片初筛(省点击) → 开简历LLM精排 → 按分打招呼。</div>
 
       <div class="action-bar">
-        <el-button :loading="isSaving" @click="handleSave">仅保存</el-button>
-        <el-button type="primary" :loading="isSaving" @click="handleSaveAndRun">
+        <el-button :loading="isSaving" :disabled="!!regexError" @click="handleSave"
+          >仅保存</el-button
+        >
+        <el-button
+          type="primary"
+          :loading="isSaving"
+          :disabled="!!regexError"
+          @click="handleSaveAndRun"
+        >
           保存并运行
         </el-button>
       </div>
@@ -63,7 +75,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RunningOverlay from '@renderer/features/RunningOverlay/index.vue'
 import { RUNNING_STATUS_ENUM } from '../../../../../common/enums/auto-start-chat'
@@ -79,7 +91,24 @@ import RunTab from './RunTab.vue'
 const { ipcRenderer } = electron
 
 const activeTab = ref('scoring')
+const loaded = ref(false)
 const isSaving = ref(false)
+
+const checkRegex = (v: string): string => {
+  if (!v) return ''
+  try {
+    // eslint-disable-next-line no-new
+    new RegExp(v)
+    return ''
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+const regexError = computed(
+  () =>
+    checkRegex(state.filter.expectEducationRegExpStr) ||
+    checkRegex(state.filter.blockCandidateNameRegExpStr)
+)
 const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
@@ -97,13 +126,15 @@ const applyState = (next: RecommendConfigState) => {
 
 onMounted(async () => {
   try {
-    const { state: loaded, sequenceJobsEnabled: seq } = await loadRecommendConfig()
-    applyState(loaded)
+    const { state: loadedState, sequenceJobsEnabled: seq } = await loadRecommendConfig()
+    applyState(loadedState)
     sequenceJobsEnabled.value = seq
   } catch (err) {
     console.error(err)
     ElMessage({ type: 'error', message: '加载配置失败，已使用默认值' })
     applyState(normalizeRecommendConfig({}))
+  } finally {
+    loaded.value = true
   }
   try {
     models.value = await fetchEnabledModels()
@@ -186,6 +217,21 @@ const handleStopButtonClick = async () => {
     font-size: 13px;
     color: #606266;
     margin: 16px 0 8px;
+  }
+
+  .loading-placeholder {
+    padding: 48px 0;
+    text-align: center;
+    color: #909399;
+  }
+
+  .regex-warn {
+    margin-top: 12px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #f56c6c;
+    background: #fef0f0;
+    border-radius: 4px;
   }
 
   .section-title {

@@ -11,24 +11,21 @@ export const DEFAULTS = {
   delayBetweenActionsMs: [1500, 4000],
   minScoreToChat: 0,
   onScoreError: 'skip',
-  rerunIntervalMs: 600000,
-  maxChatPerRun: 50
+  rerunIntervalMs: 600000
 }
 
 const arr = (v) => (Array.isArray(v) ? v : [])
 const num = (v, d) => (typeof v === 'number' && !Number.isNaN(v) ? v : d)
 const sortedRange = (v, d) => {
-  const a =
-    Array.isArray(v) && v.length >= 2 ? [num(v[0], d[0]), num(v[1], d[1])] : [...d]
+  const a = Array.isArray(v) && v.length >= 2 ? [num(v[0], d[0]), num(v[1], d[1])] : [...d]
   return a[0] <= a[1] ? a : [a[1], a[0]]
 }
 
-export function normalizeRecommendConfig (raw) {
+export function normalizeRecommendConfig(raw) {
   const r = raw?.['boss-recruiter.json'] || {}
   const f = raw?.['candidate-filter.json'] || {}
   const rp = r.recommendPage || {}
   const sc = r.scoring || {}
-  const ac = r.autoChat || {}
   return {
     scoring: {
       enabled: sc.enabled === true,
@@ -43,7 +40,8 @@ export function normalizeRecommendConfig (raw) {
         typeof f.expectEducationRegExpStr === 'string' ? f.expectEducationRegExpStr : '',
       expectWorkExpRange: sortedRange(f.expectWorkExpRange, [0, 99]),
       expectSalaryRange: sortedRange(f.expectSalaryRange, [0, 0]),
-      expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable === 'include' ? 'include' : 'exclude',
+      expectSalaryWhenNegotiable:
+        f.expectSalaryWhenNegotiable === 'include' ? 'include' : 'exclude',
       expectSkillKeywords: arr(f.expectSkillKeywords),
       expectSchoolKeywords: arr(f.expectSchoolKeywords),
       expectMajorKeywords: arr(f.expectMajorKeywords),
@@ -58,9 +56,7 @@ export function normalizeRecommendConfig (raw) {
       maxScrollSteps: num(rp.maxScrollSteps, DEFAULTS.maxScrollSteps),
       maxStaleWaves: num(rp.maxStaleWaves, DEFAULTS.maxStaleWaves),
       scrollDelayMsRange: sortedRange(rp.scrollDelayMsRange, DEFAULTS.scrollDelayMsRange),
-      delayBetweenActionsMs: sortedRange(rp.delayBetweenActionsMs, DEFAULTS.delayBetweenActionsMs),
-      greetingMessage: typeof ac.greetingMessage === 'string' ? ac.greetingMessage : '',
-      maxChatPerRun: num(ac.maxChatPerRun, DEFAULTS.maxChatPerRun)
+      delayBetweenActionsMs: sortedRange(rp.delayBetweenActionsMs, DEFAULTS.delayBetweenActionsMs)
     },
     run: {
       clickNotInterestedForFiltered: rp.clickNotInterestedForFiltered !== false,
@@ -72,7 +68,7 @@ export function normalizeRecommendConfig (raw) {
   }
 }
 
-export function toSavePayload (s) {
+export function toSavePayload(s) {
   return {
     // candidate-filter.json（save-boss-recruiter-config 读扁平键）
     expectCityList: s.filter.expectCityList,
@@ -87,7 +83,6 @@ export function toSavePayload (s) {
     skipViewedCandidates: s.filter.skipViewedCandidates,
     // boss-recruiter.json
     scoring: { ...s.scoring },
-    autoChat: { greetingMessage: s.budget.greetingMessage, maxChatPerRun: s.budget.maxChatPerRun },
     advanced: { persistProfile: s.run.persistProfile },
     recommendPage: {
       waveSize: s.budget.waveSize,

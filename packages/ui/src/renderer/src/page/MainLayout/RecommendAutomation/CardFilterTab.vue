@@ -37,6 +37,7 @@
           <el-input-number
             v-model="model.expectWorkExpRange[0]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最小"
           />
@@ -44,6 +45,7 @@
           <el-input-number
             v-model="model.expectWorkExpRange[1]"
             :min="0"
+            :value-on-clear="99"
             controls-position="right"
             placeholder="最大"
           />
@@ -55,6 +57,7 @@
           <el-input-number
             v-model="model.expectSalaryRange[0]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最小"
           />
@@ -62,6 +65,7 @@
           <el-input-number
             v-model="model.expectSalaryRange[1]"
             :min="0"
+            :value-on-clear="0"
             controls-position="right"
             placeholder="最大"
           />

@@ -178,6 +178,21 @@ function normalizeSalaryRangeToK (range) {
   return [min, max]
 }
 
+/**
+ * 安全编译正则：无效模式返回 null（视为该规则不生效），避免整轮运行因用户填错正则而崩溃。
+ * @param {string} pattern
+ * @param {string} [flags]
+ * @returns {RegExp|null}
+ */
+function safeRegExp (pattern, flags) {
+  if (!pattern || typeof pattern !== 'string') return null
+  try {
+    return new RegExp(pattern, flags)
+  } catch {
+    return null
+  }
+}
+
 /** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'school'|'major'|'blockName'|'viewed'} FilterResultReason */
 
 /**
@@ -216,9 +231,7 @@ export function filterCandidates (candidates, filterConfig) {
     skipViewedCandidates = false
   } = filterConfig || {}
 
-  const blockNameReg = blockCandidateNameRegExpStr
-    ? new RegExp(blockCandidateNameRegExpStr, 'i')
-    : null
+  const blockNameReg = safeRegExp(blockCandidateNameRegExpStr, 'i')
 
   const matched = []
   const skipped = []
@@ -260,9 +273,10 @@ export function filterCandidates (candidates, filterConfig) {
 
     const educationRegExpStr = expectEducationRegExpStr ||
       (Array.isArray(expectEducationList) && expectEducationList.length ? expectEducationList.join('|') : '')
-    if (educationRegExpStr) {
+    const educationReg = safeRegExp(educationRegExpStr)
+    if (educationReg) {
       const education = (candidate.education ?? '').trim()
-      if (!education || !new RegExp(educationRegExpStr).test(education)) {
+      if (!education || !educationReg.test(education)) {
         skipped.push({
           candidate,
           filterResult: {

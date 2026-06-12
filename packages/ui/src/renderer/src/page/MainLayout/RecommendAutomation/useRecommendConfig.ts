@@ -46,7 +46,7 @@ export async function fetchEnabledModels(): Promise<ModelOption[]> {
       if (typeof model?.id !== 'string' || !model.id) continue
       out.push({
         id: model.id,
-        label: `${provider?.name ?? '未命名'} / ${model?.name ?? model.id}`
+        label: `${provider?.name ?? '未命名'} / ${model?.name || model?.model || model.id}`
       })
     }
   }

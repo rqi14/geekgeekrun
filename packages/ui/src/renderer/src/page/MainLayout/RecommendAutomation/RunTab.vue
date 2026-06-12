@@ -26,10 +26,20 @@
         </el-checkbox>
       </el-form-item>
       <el-form-item label="两轮之间的等待间隔（毫秒）">
-        <el-input-number v-model="model.rerunIntervalMs" :min="0" controls-position="right" />
+        <el-input-number
+          v-model="model.rerunIntervalMs"
+          :min="0"
+          :value-on-clear="0"
+          :disabled="model.runOnceAfterComplete"
+          controls-position="right"
+        />
+        <div class="form-tip">仅在「不勾选单轮停止」时生效。</div>
       </el-form-item>
       <el-form-item>
-        <el-checkbox v-model="model.keepBrowserOpenAfterRun">
+        <el-checkbox
+          v-model="model.keepBrowserOpenAfterRun"
+          :disabled="!model.runOnceAfterComplete"
+        >
           单轮结束后保持浏览器打开（需同时勾选「单轮运行完成后停止」）
         </el-checkbox>
       </el-form-item>
