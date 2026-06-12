@@ -23,7 +23,9 @@ export function mapRawCard (raw) {
     eduExps,
     workExps,
     schools: eduExps.map((e) => e?.school).filter(Boolean),
-    majors: eduExps.map((e) => e?.major).filter(Boolean),
+    // 专业槽位有时被学历占用（教育时间线缺少专业 span 时），剔除明显是学历的 token
+    majors: eduExps.map((e) => e?.major).filter(Boolean).filter((m) => !DEGREE_RE.test(m)),
+    _hasViewed: !!raw.hasViewed,
     inViewport: !!raw.inViewport,
     interactable: !!raw.interactable
   }

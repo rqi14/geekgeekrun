@@ -22,6 +22,7 @@ function extractRawCardsInFrame () {
     )
   return lis.map((li) => {
     const isSimilar = !!li.querySelector('div.similar-geek-wrap')
+    const wrap = li.querySelector('div.candidate-card-wrap')
     const inner = li.querySelector('div.candidate-card-wrap > div.card-inner[data-geek]')
     const r = (inner || li).getBoundingClientRect()
     const inViewport = r.top >= 0 && r.bottom <= vh
@@ -31,6 +32,7 @@ function extractRawCardsInFrame () {
         ? inner.getAttribute('data-geek') || inner.getAttribute('data-geekid') || ''
         : '',
       isSimilar,
+      hasViewed: wrap ? wrap.classList.contains('has-viewed') : false,
       name: inner ? txt(inner, 'span.name') : '',
       salary: inner ? txt(inner, 'div.salary-wrap span') : '',
       activeText: inner ? txt(inner, 'span.active-text') : '',

@@ -40,6 +40,17 @@ test('edu/work fields default to [] when raw lacks them', () => {
   assert.deepEqual(c.eduExps, [])
   assert.deepEqual(c.workExps, [])
 })
+test('majors drops degree token when major slot is missing in the timeline', () => {
+  // 教育时间线缺专业 span 时，degree 会落到 major 槽位（[学校, 学历]）
+  const c = mapRawCard({ ...raw, eduExps: [{ school: '浙江大学', major: '博士', degree: '' }] })
+  assert.deepEqual(c.schools, ['浙江大学'])
+  assert.deepEqual(c.majors, []) // 学历不应被当成专业
+})
+test('maps hasViewed into _hasViewed', () => {
+  assert.equal(mapRawCard({ ...raw, hasViewed: true })._hasViewed, true)
+  assert.equal(mapRawCard({ ...raw, hasViewed: false })._hasViewed, false)
+  assert.equal(mapRawCard(raw)._hasViewed, false)
+})
 test('isPrimaryCard false when isSimilar', () => {
   assert.equal(isPrimaryCard({ ...raw, isSimilar: true }), false)
 })

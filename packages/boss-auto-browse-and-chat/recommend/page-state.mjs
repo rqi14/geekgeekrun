@@ -74,6 +74,8 @@ export async function selfHeal (page, frame) {
     await page.$eval('div.dialog-wrap.active .boss-popup__close', (el) => el.click()).catch(() => {})
     return
   }
+  // UNKNOWN/未处理：退避，避免调用方 while(true) 在零延迟下空转重复 detectState
+  await sleep(800)
 }
 
 export { STATES }
