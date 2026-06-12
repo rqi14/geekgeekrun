@@ -135,6 +135,7 @@ const route = useRoute()
 
 const RECRUITER_ROUTES = [
   'BossJobConfig',
+  'RecommendAutomation',
   'BossAutoBrowseAndChat',
   'BossChatPage',
   'BossAutoSequence',
