@@ -7,6 +7,7 @@ import { ruleFilterList } from './pure/rule-filter.mjs'
 import { score } from './scorer.mjs'
 import { openResume, assertIdentity, readSummary, greetInModal, closeResume } from './resume-inspector.mjs'
 import { rejectFromList, scrollGently } from './actions.mjs'
+import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
 
 /**
@@ -65,7 +66,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       if (pre.result === 'reject') {
         if (hooks?.onCandidateFiltered)
           await hooks.onCandidateFiltered.promise([c], { matched: false, reason: pre.reason }).catch(() => {})
-        if (budgets.x > 0) {
+        if (budgets.x > 0 && shouldClickX(cfg)) {
           if (await rejectFromList(page, frame, cursor, c.encryptGeekId, pre.reason)) budgets.x--
         }
         seen.add(c.encryptGeekId)
@@ -90,7 +91,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       // Stage C: hardReject → close + X; score≥min + budget → greet; else close
       if (scored.hardReject) {
         await closeResume(page, frame, cursor)
-        if (budgets.x > 0) {
+        if (budgets.x > 0 && shouldClickX(cfg)) {
           if (await rejectFromList(page, frame, cursor, c.encryptGeekId, scored.reason)) budgets.x--
         }
       } else if (scored.score >= cfg.minScoreToChat && budgets.greet > 0) {
