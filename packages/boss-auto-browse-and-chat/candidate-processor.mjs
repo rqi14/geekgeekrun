@@ -178,7 +178,7 @@ function normalizeSalaryRangeToK (range) {
   return [min, max]
 }
 
-/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'blockName'|'viewed'} FilterResultReason */
+/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'school'|'major'|'blockName'|'viewed'} FilterResultReason */
 
 /**
  * 按 candidate-filter 配置筛选候选人
@@ -191,10 +191,14 @@ function normalizeSalaryRangeToK (range) {
  *   expectSalaryRange?: [number, number],
  *   expectSalaryWhenNegotiable?: 'exclude'|'include',
  *   expectSkillKeywords?: string[],
+ *   expectSchoolKeywords?: string[],
+ *   expectMajorKeywords?: string[],
  *   blockCandidateNameRegExpStr?: string,
  *   skipViewedCandidates?: boolean
  * }} filterConfig
  * expectSalaryWhenNegotiable: 候选人薪资为"面议"或无法解析时：'exclude'=不通过，'include'=通过
+ * expectSchoolKeywords: 命中候选人学校名(schools)或档次标签(tags，如 双一流/QS前500院校)任一子串即通过
+ * expectMajorKeywords: 命中候选人专业(majors)任一子串即通过
  * @returns {{ matched: Array<{ candidate: object, filterResult: { matched: true } }>, skipped: Array<{ candidate: object, filterResult: { matched: false, reason: FilterResultReason } }> }}
  */
 export function filterCandidates (candidates, filterConfig) {
@@ -206,6 +210,8 @@ export function filterCandidates (candidates, filterConfig) {
     expectSalaryRange = [0, 0],
     expectSalaryWhenNegotiable = 'exclude',
     expectSkillKeywords = [],
+    expectSchoolKeywords = [],
+    expectMajorKeywords = [],
     blockCandidateNameRegExpStr = '',
     skipViewedCandidates = false
   } = filterConfig || {}
@@ -328,6 +334,45 @@ export function filterCandidates (candidates, filterConfig) {
             matched: false,
             reason: 'skills',
             reasonDetail: `期望技能关键词 ${expectSkillKeywords.join('、')}，候选人技能/优势中未匹配`
+          }
+        })
+        continue
+      }
+    }
+
+    // 学校：命中学校名(schools)或档次标签(tags)任一即通过；候选人无学校/标签数据时按未匹配处理
+    if (Array.isArray(expectSchoolKeywords) && expectSchoolKeywords.length) {
+      const schoolHay = [
+        ...(Array.isArray(candidate.schools) ? candidate.schools : []),
+        ...(Array.isArray(candidate.tags) ? candidate.tags : [])
+      ]
+        .join(' ')
+        .toLowerCase()
+      const hasMatch = expectSchoolKeywords.some((kw) => schoolHay.includes((kw ?? '').toLowerCase()))
+      if (!hasMatch) {
+        skipped.push({
+          candidate,
+          filterResult: {
+            matched: false,
+            reason: 'school',
+            reasonDetail: `期望院校关键词 ${expectSchoolKeywords.join('、')}，候选人学校/档次标签中未匹配`
+          }
+        })
+        continue
+      }
+    }
+
+    // 专业：命中候选人专业(majors)任一子串即通过
+    if (Array.isArray(expectMajorKeywords) && expectMajorKeywords.length) {
+      const majorHay = (Array.isArray(candidate.majors) ? candidate.majors : []).join(' ').toLowerCase()
+      const hasMatch = expectMajorKeywords.some((kw) => majorHay.includes((kw ?? '').toLowerCase()))
+      if (!hasMatch) {
+        skipped.push({
+          candidate,
+          filterResult: {
+            matched: false,
+            reason: 'major',
+            reasonDetail: `期望专业关键词 ${expectMajorKeywords.join('、')}，候选人专业中未匹配`
           }
         })
         continue

@@ -7,6 +7,11 @@ const raw = {
   name: '朱睿婕', salary: '10-11K', activeText: '刚刚活跃',
   baseInfo: ['25岁', '26年应届生', '硕士'],
   expect: ['杭州', '化工'], advantage: '具备扎实科研能力', tags: ['QS前500院校'],
+  eduExps: [
+    { school: '浙江大学', major: '食品科学', degree: '博士' },
+    { school: '浙江工商大学', major: '食品科学与工程', degree: '硕士' }
+  ],
+  workExps: [{ company: '浙大', title: '博士研究员' }],
   isSimilar: false, inViewport: true, interactable: true
 }
 
@@ -16,6 +21,24 @@ test('maps base-info into education/workExp/age', () => {
   assert.equal(c.education, '硕士')
   assert.equal(c.city, '杭州')
   assert.equal(c.salary, '10-11K')
+})
+test('maps edu-exps into schools/majors and keeps eduExps', () => {
+  const c = mapRawCard(raw)
+  assert.deepEqual(c.schools, ['浙江大学', '浙江工商大学'])
+  assert.deepEqual(c.majors, ['食品科学', '食品科学与工程'])
+  assert.equal(c.eduExps.length, 2)
+  assert.equal(c.eduExps[0].degree, '博士')
+})
+test('maps work-exps into workExps', () => {
+  const c = mapRawCard(raw)
+  assert.deepEqual(c.workExps, [{ company: '浙大', title: '博士研究员' }])
+})
+test('edu/work fields default to [] when raw lacks them', () => {
+  const c = mapRawCard({ ...raw, eduExps: undefined, workExps: undefined })
+  assert.deepEqual(c.schools, [])
+  assert.deepEqual(c.majors, [])
+  assert.deepEqual(c.eduExps, [])
+  assert.deepEqual(c.workExps, [])
 })
 test('isPrimaryCard false when isSimilar', () => {
   assert.equal(isPrimaryCard({ ...raw, isSimilar: true }), false)

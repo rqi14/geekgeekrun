@@ -12,6 +12,14 @@ function extractRawCardsInFrame () {
     Array.from(el.querySelectorAll(sel))
       .map((n) => n.textContent.trim())
       .filter(Boolean)
+  // 时间线（教育/工作）：每个 .timeline-item 的 .join-text-wrap.content 内 span 依次为
+  //   教育 = [学校, 专业, 学历]，工作 = [公司, 职位]
+  const timeline = (el, wrapCls) =>
+    Array.from(el.querySelectorAll(`div.timeline-wrap.${wrapCls} div.timeline-item`)).map((it) =>
+      Array.from(it.querySelectorAll('div.join-text-wrap.content span'))
+        .map((s) => s.textContent.trim())
+        .filter(Boolean)
+    )
   return lis.map((li) => {
     const isSimilar = !!li.querySelector('div.similar-geek-wrap')
     const inner = li.querySelector('div.candidate-card-wrap > div.card-inner[data-geek]')
@@ -30,6 +38,16 @@ function extractRawCardsInFrame () {
       expect: inner ? txts(inner, 'div.expect-wrap span.content div.join-text-wrap span') : [],
       advantage: inner ? txt(inner, 'div.geek-desc span.content') : '',
       tags: inner ? txts(inner, 'div.tags-wrap span.tag-item') : [],
+      eduExps: inner
+        ? timeline(inner, 'edu-exps').map((c) => ({
+            school: c[0] || '',
+            major: c[1] || '',
+            degree: c[2] || ''
+          }))
+        : [],
+      workExps: inner
+        ? timeline(inner, 'work-exps').map((c) => ({ company: c[0] || '', title: c[1] || '' }))
+        : [],
       inViewport,
       interactable
     }
@@ -48,4 +66,5 @@ export async function scrapeCards (frame) {
 }
 
 // LIVE-SMOKE PENDING: launch browser, navigate to recommend page, call scrapeCards(frame),
-// log first 3 results — confirm name/salary/education populate and similar-geek cards are excluded
+// log first 3 results — confirm name/salary/education populate, eduExps/schools/majors populate
+// (e.g. [{school:'浙江大学',major:'食品科学',degree:'博士'}]), and similar-geek cards are excluded

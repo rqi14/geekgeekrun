@@ -6,6 +6,8 @@ const DEGREE_RE = /本科|硕士|博士|大专|专科|MBA|中专|高中|初中/
 export function mapRawCard (raw) {
   const baseInfo = Array.isArray(raw.baseInfo) ? raw.baseInfo : []
   const expect = Array.isArray(raw.expect) ? raw.expect : []
+  const eduExps = Array.isArray(raw.eduExps) ? raw.eduExps : []
+  const workExps = Array.isArray(raw.workExps) ? raw.workExps : []
   return {
     encryptGeekId: raw.encryptGeekId ?? '',
     geekName: raw.name ?? '',
@@ -18,6 +20,10 @@ export function mapRawCard (raw) {
     jobTitle: expect[1] ?? null,
     skills: raw.advantage ?? '',
     tags: Array.isArray(raw.tags) ? raw.tags : [],
+    eduExps,
+    workExps,
+    schools: eduExps.map((e) => e?.school).filter(Boolean),
+    majors: eduExps.map((e) => e?.major).filter(Boolean),
     inViewport: !!raw.inViewport,
     interactable: !!raw.interactable
   }

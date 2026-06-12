@@ -18,6 +18,12 @@ test('workExp → 与职位不符 preferred over 工作经历', () => {
 test('viewed → 重复推荐', () => {
   assert.equal(fuzzyReason('viewed', OPTIONS, FALLBACK), '重复推荐')
 })
+test('school → falls through to 与职位不符 when no 院校/学历 option', () => {
+  assert.equal(fuzzyReason('school', OPTIONS, FALLBACK), '期望（药物分析）与职位不符')
+})
+test('major → falls through to 与职位不符 when no 专业 option', () => {
+  assert.equal(fuzzyReason('major', OPTIONS, FALLBACK), '期望（药物分析）与职位不符')
+})
 test('unknown reason → fallback', () => {
   assert.equal(fuzzyReason('zzz', OPTIONS, FALLBACK), '其他原因')
 })
