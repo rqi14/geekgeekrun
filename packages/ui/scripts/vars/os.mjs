@@ -9,5 +9,5 @@ export const osPlatformToBuildCommandMap = {
 export const buildTargetListMapByPlatform = {
   darwin: ['dmg'],
   linux: ['deb'],
-  win32: ['nsis']
+  win32: ['nsis', 'portable']
 }

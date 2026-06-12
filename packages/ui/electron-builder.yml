@@ -19,11 +19,14 @@ asarUnpack:
   - 'resources/**'
 win:
   executableName: geekgeekrun
+  signAndEditExecutable: false
 nsis:
   artifactName: ${name}_${version}_${arch}_setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+portable:
+  artifactName: ${name}_${version}_${arch}_portable.${ext}
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:

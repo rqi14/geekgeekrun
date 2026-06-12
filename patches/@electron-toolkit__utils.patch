@@ -1,0 +1,13 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index cc41c0d822968f6de39adf04ee3360b09feb9ba1..e6e4edbe04f46084f96e6e0b2b0099aed434fe82 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -3,7 +3,7 @@
+ const electron = require('electron');
+
+ const is = {
+-  dev: !electron.app.isPackaged
++  get dev() { return !(electron.app && electron.app.isPackaged); }
+ };
+
+ const platform = {
