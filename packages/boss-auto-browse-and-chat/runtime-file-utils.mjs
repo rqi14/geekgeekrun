@@ -193,11 +193,17 @@ function jobFilterToCandidateFilter (jobFilter) {
     expectWorkExpRange,
     expectSalaryRange,
     expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable || 'exclude',
-    expectSkillKeywords: [],
-    blockCandidateNameRegExpStr: '',
-    skipViewedCandidates: false
+    expectSkillKeywords: Array.isArray(f.expectSkillKeywords) ? f.expectSkillKeywords : [],
+    expectSchoolKeywords: Array.isArray(f.expectSchoolKeywords) ? f.expectSchoolKeywords : [],
+    expectMajorKeywords: Array.isArray(f.expectMajorKeywords) ? f.expectMajorKeywords : [],
+    blockCandidateNameRegExpStr:
+      typeof f.blockCandidateNameRegExpStr === 'string' ? f.blockCandidateNameRegExpStr : '',
+    skipViewedCandidates: f.skipViewedCandidates === true
   }
 }
+
+// 测试别名（供 recommend/pure/job-filter-passthrough.test.mjs 使用）
+export const __jobFilterToCandidateFilter = jobFilterToCandidateFilter
 
 /**
  * 将 boss-jobs-config 的 filter 转换为 chatPage.filter 格式（简历筛选）。

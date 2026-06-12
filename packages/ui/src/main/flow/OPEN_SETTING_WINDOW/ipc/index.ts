@@ -996,6 +996,12 @@ export default function initIpc() {
         bossRecruiterConfig.advanced.persistProfile = payload.advanced.persistProfile
       }
     }
+    if (hasOwn(payload, 'scoring') && payload.scoring && typeof payload.scoring === 'object') {
+      bossRecruiterConfig.scoring = {
+        ...bossRecruiterConfig.scoring,
+        ...payload.scoring
+      }
+    }
 
     const candidateFilterConfig = readBossConfigFile('candidate-filter.json') || {}
     if (hasOwn(payload, 'expectCityList')) {
@@ -1021,6 +1027,12 @@ export default function initIpc() {
     }
     if (hasOwn(payload, 'skipViewedCandidates')) {
       candidateFilterConfig.skipViewedCandidates = payload.skipViewedCandidates
+    }
+    if (hasOwn(payload, 'expectSchoolKeywords')) {
+      candidateFilterConfig.expectSchoolKeywords = payload.expectSchoolKeywords
+    }
+    if (hasOwn(payload, 'expectMajorKeywords')) {
+      candidateFilterConfig.expectMajorKeywords = payload.expectMajorKeywords
     }
 
     return await Promise.all([
