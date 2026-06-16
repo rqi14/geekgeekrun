@@ -105,7 +105,8 @@ export function getEnabledLlmClient (purpose = 'resume_screening', preferModelId
  */
 export async function evaluateResumeByRubric (resumeText, rubricConfig, options = {}) {
   const defaultResult = { isPassed: true, totalScore: 0, reason: 'LLM 调用失败，默认通过' }
-  // 模型由 failover 链按用途解析（options.modelId 已废弃，保留签名兼容）
+  // options.modelId：用户显式选定模型，置于 failover 链首（仍保留其余模型兜底）
+  const preferModelId = typeof options?.modelId === 'string' ? options.modelId : null
   const knockouts = Array.isArray(rubricConfig?.knockouts) ? rubricConfig.knockouts : []
   const dimensions = Array.isArray(rubricConfig?.dimensions) ? rubricConfig.dimensions : []
   const passThreshold = typeof rubricConfig?.passThreshold === 'number' ? rubricConfig.passThreshold : 75
@@ -170,7 +171,7 @@ ${dimensionsDesc}
     const result = await callLayer(config, 'resume_screening', [
       { role: 'system', content: systemContent },
       { role: 'user', content: truncatedResume }
-    ], { schema, maxOutputTokens: RESUME_SCREENING_MAX_TOKENS })
+    ], { schema, maxOutputTokens: RESUME_SCREENING_MAX_TOKENS, preferModelId })
 
     const parsed = result?.parsed
     logDebug(LOG, 'evaluateResumeByRubric parsed?', !!parsed)
@@ -224,7 +225,8 @@ export async function generateRubricFromJd (sourceJd, options = {}) {
       { name: '综合匹配度', weight: 100, criteria: { '1': '不符合', '3': '部分符合', '5': '完全符合' } }
     ]
   }
-  // 模型由 failover 链按 rubric_generation 用途解析（options.modelId 已废弃，保留签名兼容）
+  // options.modelId：用户显式选定模型，置于 failover 链首
+  const preferModelId = typeof options?.modelId === 'string' ? options.modelId : null
   const systemContent = `你是一个资深 HR，擅长将招聘需求转化为可量化的候选人评分体系（Rubric）。
 
 请仔细阅读用户提供的岗位描述（JD），从中提取并生成：
@@ -271,7 +273,7 @@ export async function generateRubricFromJd (sourceJd, options = {}) {
     const result = await callLayer(config, 'rubric_generation', [
       { role: 'system', content: systemContent },
       { role: 'user', content: sourceJd || '（请输入岗位描述）' }
-    ], { schema, maxOutputTokens: RUBRIC_GENERATION_MAX_TOKENS })
+    ], { schema, maxOutputTokens: RUBRIC_GENERATION_MAX_TOKENS, preferModelId })
     const parsed = result?.parsed
     logDebug(LOG, 'generateRubricFromJd parsed?', !!parsed)
     if (!parsed) return { rubric: defaultRubric }

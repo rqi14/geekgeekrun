@@ -18,17 +18,29 @@ function flattenEnabled (config) {
 }
 
 /**
- * resolveModelChain(config, purpose) — 三级回落:purpose → default → 全局启用顺序。
+ * resolveModelChain(config, purpose, preferModelId) — 三级回落:purpose → default → 全局启用顺序。
+ * preferModelId(用户在 UI 显式选定的模型,如评分/ rubric 生成)若存在且启用,置于链首(去重),
+ * 既尊重用户选择,又保留其余模型作为 failover 兜底。
  */
-export function resolveModelChain (config, purpose) {
+export function resolveModelChain (config, purpose, preferModelId = null) {
   const all = flattenEnabled(config)
   const byId = (ids) => (ids || []).map((id) => all.find((m) => m.id === id)).filter(Boolean)
 
+  let chain
   const p = byId(config.purposes?.[purpose]?.modelIds)
-  if (p.length) return p
-  const d = byId(config.purposes?.default?.modelIds)
-  if (d.length) return d
-  return all
+  if (p.length) chain = p
+  else {
+    const d = byId(config.purposes?.default?.modelIds)
+    chain = d.length ? d : all
+  }
+
+  if (preferModelId) {
+    const preferred = all.find((m) => m.id === preferModelId)
+    if (preferred) {
+      chain = [preferred, ...chain.filter((m) => m.id !== preferModelId)]
+    }
+  }
+  return chain
 }
 
 function profileFor (model, endpoint) {
@@ -53,13 +65,13 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /**
  * chatCompleteForPurpose(config, purpose, messages, opts)。
- * opts: { schema, maxOutputTokens, sampling, _chatComplete, _sleep }
+ * opts: { schema, maxOutputTokens, sampling, preferModelId, _chatComplete, _sleep }
  */
 export async function chatCompleteForPurpose (config, purpose, messages, opts = {}) {
   const chat = opts._chatComplete || realChatComplete
   const sleep = opts._sleep || defaultSleep
   const retry = config.retry || { maxAttemptsPerModel: 2, backoffMs: 500, maxBackoffMs: 20000, totalDeadlineMs: 120000 }
-  const chain = resolveModelChain(config, purpose)
+  const chain = resolveModelChain(config, purpose, opts.preferModelId ?? null)
   const deadline = Date.now() + (retry.totalDeadlineMs ?? 120000)
   const failures = []
 

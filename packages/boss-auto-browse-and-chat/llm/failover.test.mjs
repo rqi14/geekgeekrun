@@ -31,6 +31,16 @@ test('resolveModelChain: empty purpose+default → global enabled order', () => 
   assert.deepEqual(chain.map((m) => m.id), ['m1', 'm2'])
 })
 
+test('resolveModelChain: preferModelId hoisted to front, rest kept as fallback', () => {
+  const chain = resolveModelChain(config, 'resume_screening', 'm1')
+  assert.deepEqual(chain.map((m) => m.id), ['m1', 'm2'])
+})
+
+test('resolveModelChain: unknown preferModelId ignored', () => {
+  const chain = resolveModelChain(config, 'resume_screening', 'nope')
+  assert.deepEqual(chain.map((m) => m.id), ['m2', 'm1'])
+})
+
 test('success on first model', async () => {
   const fake = async (model) => ({ content: 'ok', parsed: { v: model.model }, usage: {}, raw: {} })
   const r = await chatCompleteForPurpose(config, 'resume_screening', [], { _chatComplete: fake })
