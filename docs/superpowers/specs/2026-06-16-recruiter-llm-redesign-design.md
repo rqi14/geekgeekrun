@@ -44,7 +44,7 @@ packages/boss-auto-browse-and-chat/llm/
     glm.mjs             # 智谱 bigmodel
     openai-chat.mjs     # OpenAI Chat Completions 兼容
     openai-responses.mjs# OpenAI Responses API(GPT-5/o系优先)
-    volc.mjs            # 火山方舟(单独建档,不与 SiliconFlow 混)
+    # volc.mjs(火山方舟专用 dialect)= v1 不做,字段未核实;v1 走 generic(火山 Ark OpenAI 兼容),待核实后再单独建档
     index.mjs           # 注册表 + resolveDialect({baseURL, brandLock, endpoint, family})
                         #   openai 族:endpoint='auto' 时由 family 选 chat/responses;'chat'/'responses' 则锁定
   families.mjs          # resolveModelFamily(modelId) -> 能力标志(是否推理模型/JSON 支持/采样限制)
@@ -93,7 +93,7 @@ export default {
 
 ```js
 {
-  dialectId: 'generic' | 'qwen' | 'deepseek' | 'glm' | 'openai-chat' | 'openai-responses' | 'volc',
+  dialectId: 'generic' | 'qwen' | 'deepseek' | 'glm' | 'openai-chat' | 'openai-responses',  // 'volc' 待后续
   endpoint: 'chat' | 'responses',
   thinkingStyle:
     'top_level_enable' |                   // generic/SiliconFlow: enable_thinking + thinking_budget
@@ -120,7 +120,7 @@ export default {
 | **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type:'enabled'\|'disabled'}`(本项目对 V4 **统一只用 thinking_type**;DeepSeek API 亦提供 `reasoning_effort`,但为单一代码路径不采用,避免与 thinking_type 同发,Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
 | **GLM / 智谱** | `thinking:{ type:'enabled'\|'disabled' }`(字符串,非 bool) | GLM-4.5 默认动态思考 |
 | **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前 OpenAI 官方文档明确列出该模型支持时才提供;不引入官方文档未列出的档位(Codex #1) |
-| **火山方舟 Volc Ark** | 单独建档,按其文档确认字段 | 不与 SiliconFlow 混 |
+| **火山方舟 Volc Ark** | v1 经 `generic`(Ark OpenAI 兼容,顶层 enable_thinking) | 专用 dialect 字段未核实,推迟到 v1 之后单独建档;**不**与 SiliconFlow 共用「确认过」的语义 |
 
 ### 3.5 chatComplete(单次调用)
 
@@ -130,7 +130,7 @@ export default {
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
 4. 若 `requiresStreamForThinking && thinking.enabled`:走 stream,聚合 `reasoning_content`+`content`,末 chunk 取 usage
 5. 调 SDK(带 `AbortController` 总超时 + 流空闲超时)
-6. **若请求了 schema**:对返回 content 本地 `JSON.parse` + schema 校验(`schema-validate.mjs`);失败则按降级链重试(json_schema→json_object→prompt-only),仍失败则交由 failover 视为该模型失败(Codex #7)
+6. **若请求了 schema**:对返回 content 本地 `JSON.parse` + schema 校验(`schema-validate.mjs`);失败抛出归类为 `invalid_output` 的错误,由 §3.6 状态机处理(同模型降级链重发,降到底再 `next_model`)(Codex #7)
 7. 归一化返回 `{ content, parsed?, reasoning, usage:{prompt,completion,reasoning,cached,total}, raw }`。`raw` **仅进程内使用**(调试),**绝不**经 IPC 回传渲染端、也不原样落日志;若需记录只记脱敏后的 usage/状态。
 
 ### 3.6 failover + retry
@@ -139,7 +139,7 @@ export default {
 1. 解析该用途的有序模型链(`purposes[purpose].modelIds`;空→全局启用模型顺序)
 2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
-4. **错误分类驱动状态机**:`classifyError(err)` 看 HTTP status + provider 错误 body/code,返回稳定契约 `{ kind, action, retryAfterMs? }`。`action` 唯一决定下一步:
+4. **错误分类驱动状态机**:`classifyError(err)` 看 HTTP status + provider 错误 body/code(以及本地抛出的校验错误,如 §3.5 步骤 6 的输出校验失败),返回稳定契约 `{ kind, action, retryAfterMs? }`。`action` 唯一决定下一步:
 
    | `kind` | 触发场景 | `action` | 行为 |
    |---|---|---|---|
@@ -147,6 +147,7 @@ export default {
    | `server` / `network` / `stream_timeout` | 5xx / ECONNRESET / 流空闲超时 | `retry_same` | 指数退避 + jitter 重试同模型 |
    | `endpoint_unavailable` | `/responses` 404、模型不在该 route | `endpoint_downgrade` | openai 且 `endpoint:'auto'`→responses 时,同模型预算内改用 `openai-chat` 重发一次;endpoint 显式锁定时退化为 `next_model` |
    | `unsupported_schema` | 请求时拒绝 `response_format`/`text.format`/schema | `schema_downgrade` | 按 §3.5 降级链(json_schema→json_object→prompt-only)**同模型**重发;降到底仍失败才 `next_model` |
+   | `invalid_output` | 请求成功但返回内容**本地 `JSON.parse`/schema 校验失败**(§3.5 步骤 6) | `schema_downgrade` → `next_model` | 先在同模型内按降级链重发(可能模型不守 schema);降到底仍非法则 `next_model` |
    | `auth` / `quota` / `unsupported_param` / `context_overflow` / `bad_request` | 鉴权失效、额度欠费(`insufficient_balance`,与限流区分)、不支持参数、超长、格式错误 | `next_model` | 不重试本模型,直接换链上下一个 |
    | `unknown` | 兜底 | `next_model` | 保守换下一个 |
 
@@ -164,7 +165,7 @@ export default {
     "id": "uuid", "name": "硅基流动", "baseURL": "https://api.siliconflow.cn/v1", "apiKey": "sk-…",
     "models": [{
       "id": "uuid", "name": "R1 简历筛选", "model": "Pro/deepseek-ai/DeepSeek-R1", "enabled": true,
-      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic;只锁定 dialect/provider 适配器,model family 仍按 model id 解析
+      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | generic(v1 brand 枚举;火山 Ark 用 generic,volc 专用值待后续);只锁定 dialect/provider 适配器,model family 仍按 model id 解析
       "endpoint": "auto",                                // auto | chat | responses;仅 openai 有意义。auto=按模型族解析(推理模型→responses,否则 chat);auto 时遇 route 不可用按 §3.6 内部降级到 chat
       "thinking": { "enabled": true, "budget": 2048, "effort": "medium" },  // budget 仅 budget 类用;effort 仅 openai 用(字符串,取值见 profile.effortValues)
       "sampling": { "temperature": null, "max_tokens": null, "top_p": null,
@@ -184,14 +185,17 @@ export default {
 
 ### 迁移(读取时跑一次,幂等,出错不致命)
 
-- 旧 `providers[]` → 每个 model 补 `brand:'auto'`、`sampling:{全 null}`、补全 `thinking.effort`。
+- 旧 `providers[]` → 每个 model 补 `brand:'auto'`、`endpoint:'auto'`、`sampling:{全 null}`、补全 `thinking.{enabled,budget,effort}`。
 - 更旧 flat `models[]` → 已有 `migrateFlatModelsToProviders` 转 providers,再同上。
 - 旧 `purposeDefaultModelId[p]` → `purposes[p].modelIds = [那个 id]`。
-- 补 `version:2`、`retry` 默认值。
+- 补全 `purposes` **全部 5 个键**(缺失者 = `{modelIds:[]}`)、`version:2`、完整 `retry` 默认值(`maxAttemptsPerModel/backoffMs/maxBackoffMs/totalDeadlineMs`)。
+- 迁移产物必须通过 v2 schema 校验(下方「持久化硬化」),保证「无感迁移」后一定是合法 v2 形状。
 
 **持久化硬化(Codex #6)**:
 - **严格 JSON**:读用 `JSON.parse`(不用 JSON5),解析失败 → 不静默丢弃,改用 `.bak` 备份原文件后再写默认值。
-- **schema 校验**:读取后校验形状;非法字段记日志但**保留未知字段**(unknown-field preservation,向前兼容更新版本写的配置)。
+- **schema 校验**(区分两类):
+  - **未知字段**(schema 未定义的键)→ **原样保留**(向前兼容更新版本写的配置)。
+  - **已知字段但值非法**(如 `endpoint` 非 auto/chat/responses、retry 负数、sampling 非数字)→ 记日志 + **回落该字段默认值**(不丢整份配置),保证产物合法。
 - **原子写**:写临时文件 → `fsync` → `rename` 覆盖,避免半截文件。
 - **写前自动备份**:迁移落盘前先把旧文件复制为 `boss-llm.json.bak`,迁移异常可回滚。
 
@@ -261,7 +265,7 @@ export default {
 
 ## 9. 风险与待确认
 
-- **火山方舟字段**未最终核实,实现时按其官方文档确认 `volc.mjs`(Codex 标注低置信)。
+- **火山方舟**:v1 经 `generic` 接入(Ark OpenAI 兼容);专用 `volc.mjs` + brand 枚举值待其字段核实后在后续版本补,届时 brand 加 `volc`、迁移把命中 Ark baseURL 的 `generic` 升级为 `volc`(向后兼容,旧配置仍能跑)。
 - **OpenAI Responses API**:若 GPT-5 兼容路径行为不稳,优先 Responses;Chat 兼容作为回退。
 - **Qwen 流式聚合**:需处理空 choice 末 chunk、流中断(部分结果、用量不确定)。
 - **快照固定**:建议预设模板里用固定快照而非 `-latest`,避免默认静默变化。
