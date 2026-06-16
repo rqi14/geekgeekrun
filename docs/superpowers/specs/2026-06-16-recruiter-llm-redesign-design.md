@@ -45,7 +45,8 @@ packages/boss-auto-browse-and-chat/llm/
     openai-chat.mjs     # OpenAI Chat Completions 兼容
     openai-responses.mjs# OpenAI Responses API(GPT-5/o系优先)
     volc.mjs            # 火山方舟(单独建档,不与 SiliconFlow 混)
-    index.mjs           # 注册表 + resolveDialect({baseURL, endpointHint})
+    index.mjs           # 注册表 + resolveDialect({baseURL, brandLock, endpoint, family})
+                        #   openai 族:endpoint='auto' 时由 family 选 chat/responses;'chat'/'responses' 则锁定
   families.mjs          # resolveModelFamily(modelId) -> 能力标志(是否推理模型/JSON 支持/采样限制)
   profiles.mjs          # resolveModelProfile({dialect, family, userOverrides}) -> ModelProfile
   chat-complete.mjs     # chatComplete(model, messages, opts)
@@ -82,7 +83,7 @@ export default {
   isReasoningModel: boolean,           // 由 model id 推断(qwq / -thinking / reasoner / o\d / gpt-5 …)
   ignoresSampling: ['temperature','top_p','frequency_penalty','presence_penalty'] | [],
   structuredOutputCap: 'json_schema' | 'json_object' | 'none',  // 该模型最高支持级别
-  effortValues?: ['low','medium','high']  // 仅 reasoning_effort 类;以当前 OpenAI 官方文档列出的档位为准(Codex #1)
+  effortValues?: string[]  // 仅 reasoning_effort 类;该模型官方文档列出的档位有序数组,内容随模型(常见 ['low','medium','high'],部分模型含 'minimal')。UI 按此数组渲染档位,不写死(Codex #1/#2)
 }
 ```
 
@@ -98,13 +99,13 @@ export default {
     'top_level_enable' |                   // generic/SiliconFlow: enable_thinking + thinking_budget
     'qwen_enable' |                        // qwen: 顶层 enable_thinking + thinking_budget,thinking 时强制 stream 内部聚合
     'model_name' |                         // deepseek 直连 reasoner: 由模型名决定
-    'thinking_type' |                      // glm / deepseek-v4 直连: thinking:{type:'enabled'|'disabled'}(单选,不与 effort 并存,Codex #2)
-    'reasoning_effort',                    // openai: reasoning_effort(chat) / reasoning.effort(responses)
+    'thinking_type' |                      // glm / deepseek-v4 直连: thinking:{type:'enabled'|'disabled'}
+    'reasoning_effort',                    // openai 专属: reasoning_effort(chat) / reasoning.effort(responses)
   tokenLimitField: 'max_tokens' | 'max_completion_tokens' | 'max_output_tokens',  // 由 dialect/endpoint 定
   unsupportedSampling: [...],             // = family.ignoresSampling ∪ dialect 限制
   structuredOutput: 'json_schema' | 'json_object' | 'none',  // = min(dialect 能力, family.structuredOutputCap)
   requiresStreamForThinking: boolean,     // dialect 定(qwen=true)
-  effortValues?: ['low','medium','high'], // = family.effortValues
+  effortValues?: string[],                // = family.effortValues(随模型,可能含 'minimal')
 }
 ```
 
@@ -116,7 +117,7 @@ export default {
 |---|---|---|
 | **generic / SiliconFlow** | 顶层 `enable_thinking:true` + `thinking_budget`(128–32768) | 返回 `reasoning_content` + `reasoning_tokens`;SiliconFlow 托管的 DeepSeek/Qwen 也走这套(**不**用各家直连写法) |
 | **Qwen / DashScope** | Node openai SDK 用**顶层**字段 `enable_thinking`/`thinking_budget`(`extra_body` 是 Python 写法) | thinking 时**必须 stream**,适配器内部 stream + 聚合;`stream_options.include_usage` 取用量;生产固定快照,不用 `-latest` |
-| **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type}` **或** `reasoning_effort` —— **二选一,绝不同时发**(Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
+| **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type:'enabled'\|'disabled'}`(本项目对 V4 **统一只用 thinking_type**;DeepSeek API 亦提供 `reasoning_effort`,但为单一代码路径不采用,避免与 thinking_type 同发,Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
 | **GLM / 智谱** | `thinking:{ type:'enabled'\|'disabled' }`(字符串,非 bool) | GLM-4.5 默认动态思考 |
 | **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前 OpenAI 官方文档明确列出该模型支持时才提供;不引入官方文档未列出的档位(Codex #1) |
 | **火山方舟 Volc Ark** | 单独建档,按其文档确认字段 | 不与 SiliconFlow 混 |
@@ -124,7 +125,7 @@ export default {
 ### 3.5 chatComplete(单次调用)
 
 `chatComplete(model, messages, { purpose, schema, sampling })`:
-1. `dialect = resolveDialect(model)`(`model.brand!=='auto'` 时按用户锁定的 dialect)
+1. `dialect = resolveDialect({baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` 锁定 dialect family;openai 族再按 `endpoint`(auto→family 选 chat/responses)定具体 dialect)
 2. `family = resolveModelFamily(model.model)`;`profile = resolveModelProfile({dialect, family, userOverrides})`
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
 4. 若 `requiresStreamForThinking && thinking.enabled`:走 stream,聚合 `reasoning_content`+`content`,末 chunk 取 usage
@@ -152,8 +153,9 @@ export default {
     "id": "uuid", "name": "硅基流动", "baseURL": "https://api.siliconflow.cn/v1", "apiKey": "sk-…",
     "models": [{
       "id": "uuid", "name": "R1 简历筛选", "model": "Pro/deepseek-ai/DeepSeek-R1", "enabled": true,
-      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic
-      "thinking": { "enabled": true, "budget": 2048, "effort": "medium" },
+      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic(用户锁定 dialect family)
+      "endpoint": "auto",                                // auto | chat | responses;仅 openai 有意义。auto=按模型族解析(推理模型→responses,否则 chat),失败时 failover 可回退 chat
+      "thinking": { "enabled": true, "budget": 2048, "effort": "medium" },  // budget 仅 budget 类用;effort 仅 openai 用(字符串,取值见 profile.effortValues)
       "sampling": { "temperature": null, "max_tokens": null, "top_p": null,
                     "frequency_penalty": null, "presence_penalty": null }  // null=不传
     }]
@@ -195,8 +197,9 @@ export default {
   - **Thinking 控件随识别 dialect/profile 变形态**(由 `thinkingStyle` 决定):
     - budget 类(`top_level_enable`/`qwen_enable`,即 Qwen/generic):`☑启用` + token 预算数字框
     - toggle 类(`thinking_type`,即 GLM / DeepSeek V4 直连):`☑启用` 开关,**无** token 预算框(该写法只有 `type:enabled|disabled`)
-    - effort 类(`reasoning_effort`,即 OpenAI):`☑启用` + 低/中/高(档位随模型,见 §3.4)
+    - effort 类(`reasoning_effort`,即 OpenAI):`☑启用` + 档位单选,**按 profile 的 `effortValues` 动态渲染**(可能是 minimal/low/medium/high 的子集,不写死)
     - model_name 类(DeepSeek reasoner 直连):只读提示"由模型名决定"
+  - **Endpoint 选择**(仅当识别/锁定为 OpenAI 族时显示):`自动 / Chat / Responses` 下拉(对应 `endpoint` 字段;自动=按模型族)
   - **高级参数**(可折叠,留空=自动):temperature / max_tokens / top_p / frequency_penalty / presence_penalty
 - [+ 添加服务商]
 
@@ -224,7 +227,7 @@ export default {
 
 ## 7. 测试策略
 
-- **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 `thinking.type` 与 `reasoning_effort` 互斥 —— 单测。
+- **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 只发 `thinking.type`、绝不发 `reasoning_effort` —— 单测。
 - **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 档位仅取当前官方文档列出的值(`low`/`medium`/`high`,`minimal` 仅在官方文档明确支持该模型时)。
 - **schema-validate**:合法 JSON 通过、非法触发降级链(json_schema→json_object→prompt-only)、最终失败上抛。
 - **failover**:mock chatComplete,验证重试次数、`classifyError`(限流 vs 额度 vs 鉴权)、`Retry-After` 遵守、jitter 存在、切模型重建请求、全失败聚合。
