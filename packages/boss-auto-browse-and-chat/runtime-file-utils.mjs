@@ -275,113 +275,150 @@ export const getMergedJobConfig = (jobId) => {
   }
 }
 
-// ── 招聘端 LLM 配置（boss-llm.json）───────────────────────────────────────────
+// ── 招聘端 LLM 配置（boss-llm.json v2）─────────────────────────────────────────
 
 const bossLlmConfigFileName = 'boss-llm.json'
-const defaultBossLlmConfig = { providers: [], purposeDefaultModelId: {} }
+
+const PURPOSE_KEYS = ['resume_screening', 'rubric_generation', 'greeting_generation', 'message_rewrite', 'default']
+const VALID_ENDPOINT = ['auto', 'chat', 'responses']
+const VALID_BRAND = ['auto', 'qwen', 'deepseek', 'glm', 'openai', 'generic']
+
+function defaultRetry () {
+  return { maxAttemptsPerModel: 2, backoffMs: 500, maxBackoffMs: 20000, totalDeadlineMs: 120000 }
+}
+
+function defaultSampling () {
+  return { temperature: null, max_tokens: null, top_p: null, frequency_penalty: null, presence_penalty: null }
+}
+
+function normalizeModel (m) {
+  if (!m || typeof m !== 'object') return null
+  const out = { ...m }
+  if (typeof out.id !== 'string' || !out.id) out.id = crypto.randomUUID()
+  if (typeof out.enabled !== 'boolean') out.enabled = true
+  if (!VALID_BRAND.includes(out.brand)) out.brand = 'auto'
+  if (!VALID_ENDPOINT.includes(out.endpoint)) out.endpoint = 'auto'
+  out.sampling = { ...defaultSampling(), ...(out.sampling && typeof out.sampling === 'object' ? out.sampling : {}) }
+  const t = out.thinking && typeof out.thinking === 'object' ? out.thinking : {}
+  out.thinking = {
+    enabled: typeof t.enabled === 'boolean' ? t.enabled : false,
+    budget: typeof t.budget === 'number' ? t.budget : 2048,
+    effort: typeof t.effort === 'string' ? t.effort : 'medium'
+  }
+  return out
+}
 
 /**
- * 将旧格式（flat models 数组）迁移为新格式（providers 数组）。
- * 按 baseURL 分组，同一 baseURL 的模型归入同一 provider。
+ * 将旧格式（flat models 数组）迁移为 providers 数组。按 baseURL 分组。
  */
 function migrateFlatModelsToProviders (oldConfig) {
   const grouped = {}
   for (const m of oldConfig.models) {
     const key = m.baseURL ?? ''
     if (!grouped[key]) {
-      grouped[key] = {
-        id: crypto.randomUUID(),
-        name: m.baseURL ?? '',
-        baseURL: m.baseURL ?? '',
-        apiKey: m.apiKey ?? '',
-        models: []
-      }
+      grouped[key] = { id: crypto.randomUUID(), name: m.baseURL ?? '', baseURL: m.baseURL ?? '', apiKey: m.apiKey ?? '', models: [] }
     }
-    const { baseURL: _b, apiKey: _a, ...modelFields } = m
-    grouped[key].models.push(modelFields)
+    const { baseURL: _b, apiKey: _a, ...rest } = m
+    grouped[key].models.push(rest)
   }
-  return {
-    providers: Object.values(grouped),
-    purposeDefaultModelId: oldConfig.purposeDefaultModelId ?? {}
+  return { providers: Object.values(grouped), purposeDefaultModelId: oldConfig.purposeDefaultModelId ?? {} }
+}
+
+/**
+ * migrateToV2(raw) — 纯函数，幂等。补全 v2 形状，非法已知字段回落默认，未知字段保留。
+ */
+export function migrateToV2 (raw) {
+  let base = raw && typeof raw === 'object' ? { ...raw } : {}
+  // flat models[] → providers
+  if (Array.isArray(base.models) && !Array.isArray(base.providers)) {
+    const migrated = migrateFlatModelsToProviders(base)
+    base = { ...base, providers: migrated.providers, purposeDefaultModelId: migrated.purposeDefaultModelId }
+    delete base.models
   }
+  if (!Array.isArray(base.providers)) base.providers = []
+
+  // providers/models 规范化
+  base.providers = base.providers
+    .filter((p) => p && typeof p === 'object')
+    .map((p) => ({
+      ...p,
+      id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
+      models: (Array.isArray(p.models) ? p.models : []).map(normalizeModel).filter(Boolean)
+    }))
+
+  // purposes：补全 5 键；迁移旧 purposeDefaultModelId
+  const purposes = base.purposes && typeof base.purposes === 'object' ? { ...base.purposes } : {}
+  const legacy = base.purposeDefaultModelId && typeof base.purposeDefaultModelId === 'object' ? base.purposeDefaultModelId : {}
+  for (const k of PURPOSE_KEYS) {
+    const existing = purposes[k]
+    if (existing && Array.isArray(existing.modelIds)) continue
+    if (legacy[k]) purposes[k] = { modelIds: [legacy[k]] }
+    else purposes[k] = { modelIds: [] }
+  }
+  base.purposes = purposes
+  delete base.purposeDefaultModelId
+
+  // retry：补全 + 非法值回落
+  const r = base.retry && typeof base.retry === 'object' ? base.retry : {}
+  const d = defaultRetry()
+  base.retry = {
+    maxAttemptsPerModel: Number.isInteger(r.maxAttemptsPerModel) && r.maxAttemptsPerModel >= 1 ? r.maxAttemptsPerModel : d.maxAttemptsPerModel,
+    backoffMs: typeof r.backoffMs === 'number' && r.backoffMs >= 0 ? r.backoffMs : d.backoffMs,
+    maxBackoffMs: typeof r.maxBackoffMs === 'number' && r.maxBackoffMs >= 0 ? r.maxBackoffMs : d.maxBackoffMs,
+    totalDeadlineMs: typeof r.totalDeadlineMs === 'number' && r.totalDeadlineMs >= 0 ? r.totalDeadlineMs : d.totalDeadlineMs
+  }
+
+  base.version = 2
+  return base
+}
+
+const defaultBossLlmConfig = () => migrateToV2({})
+
+function atomicWrite (filePath, content) {
+  const tmp = filePath + '.tmp'
+  const fd = fs.openSync(tmp, 'w')
+  try {
+    fs.writeFileSync(fd, content)
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+  fs.renameSync(tmp, filePath)
 }
 
 export const readBossLlmConfig = () => {
   ensureRuntimeFolderPathExist()
   const filePath = path.join(configFolderPath, bossLlmConfigFileName)
-  if (!fs.existsSync(filePath)) {
-    return { ...defaultBossLlmConfig }
-  }
+  if (!fs.existsSync(filePath)) return defaultBossLlmConfig()
+
   let raw
   try {
     raw = JSON.parse(fs.readFileSync(filePath, 'utf8'))
   } catch {
-    return { ...defaultBossLlmConfig }
-  }
-  // 旧格式迁移：有 models 字段但无 providers 字段
-  if (Array.isArray(raw.models) && !Array.isArray(raw.providers)) {
-    const migrated = migrateFlatModelsToProviders(raw)
-    // 写回文件，完成一次性迁移
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(migrated))
-    } catch {
-      // 写回失败不影响本次使用
-    }
-    return migrated
-  }
-  // 兼容/修复：为 providers/models 补齐缺失字段（尤其是 model.id）
-  if (!Array.isArray(raw.providers)) {
-    return { ...defaultBossLlmConfig }
+    // 坏 JSON：备份后回落默认
+    try { fs.copyFileSync(filePath, filePath + '.bak') } catch { /* ignore */ }
+    const def = defaultBossLlmConfig()
+    try { atomicWrite(filePath, JSON.stringify(def)) } catch { /* ignore */ }
+    return def
   }
 
-  let mutated = false
-  for (const p of raw.providers) {
-    if (!p || typeof p !== 'object') continue
-    if (!Array.isArray(p.models)) {
-      p.models = []
-      mutated = true
+  const migrated = migrateToV2(raw)
+  // 若迁移产生变化，写前备份 + 原子写
+  try {
+    const before = JSON.stringify(raw)
+    const after = JSON.stringify(migrated)
+    if (before !== after) {
+      try { fs.copyFileSync(filePath, filePath + '.bak') } catch { /* ignore */ }
+      atomicWrite(filePath, after)
     }
-    for (const m of p.models) {
-      if (!m || typeof m !== 'object') continue
-      if (typeof m.id !== 'string' || !m.id) {
-        m.id = crypto.randomUUID()
-        mutated = true
-      }
-      // enabled 默认 true（不写也视为启用），但旧数据可能缺失
-      if (typeof m.enabled !== 'boolean') {
-        m.enabled = true
-        mutated = true
-      }
-      if (!m.thinking || typeof m.thinking !== 'object') {
-        m.thinking = { enabled: false, budget: 2048 }
-        mutated = true
-      } else {
-        if (typeof m.thinking.enabled !== 'boolean') {
-          m.thinking.enabled = false
-          mutated = true
-        }
-        if (typeof m.thinking.budget !== 'number') {
-          m.thinking.budget = 2048
-          mutated = true
-        }
-      }
-    }
-  }
-
-  if (mutated) {
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(raw))
-    } catch {
-      // ignore
-    }
-  }
-
-  return raw
+  } catch { /* 写回失败不影响本次使用 */ }
+  return migrated
 }
 
 export const writeBossLlmConfig = async (config) => {
   ensureRuntimeFolderPathExist()
   const filePath = path.join(configFolderPath, bossLlmConfigFileName)
-  return fsPromise.writeFile(filePath, JSON.stringify(config))
+  const normalized = migrateToV2(config)
+  atomicWrite(filePath, JSON.stringify(normalized))
 }
 
