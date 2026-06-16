@@ -51,7 +51,7 @@ packages/boss-auto-browse-and-chat/llm/
   profiles.mjs          # resolveModelProfile({dialect, family, userOverrides}) -> ModelProfile
   chat-complete.mjs     # chatComplete(model, messages, opts)
   failover.mjs          # chatCompleteForPurpose(config, purpose, messages, opts)
-  errors.mjs            # 错误分类:classifyError() -> {retryable, retryAfterMs}
+  errors.mjs            # 错误分类:classifyError(err) -> {kind, action, retryAfterMs}(契约见 §3.6)
   schema-validate.mjs   # 结构化输出:本地 JSON.parse + schema 校验 + 降级
   usage.mjs             # 归一化 usage(prompt/completion/reasoning/cached tokens)
 ```
@@ -126,12 +126,12 @@ export default {
 
 `chatComplete(model, messages, { purpose, schema, sampling })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`):
 1. `family = resolveModelFamily(model.model)`(先解析 family,供下一步用)
-2. `dialect = resolveDialect({baseURL: model.baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` 锁定 dialect family;openai 族再按 `endpoint`(auto→由 family 选 chat/responses)定具体 dialect);`profile = resolveModelProfile({dialect, family, userOverrides})`
+2. `dialect = resolveDialect({baseURL: model.baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` **只锁定 dialect / provider 适配器**,model family 仍由步骤 1 的 `resolveModelFamily(model.model)` 解析,两者正交;openai 适配器组再按 `endpoint`(auto→由 family 选 chat/responses)定具体 dialect);`profile = resolveModelProfile({dialect, family, userOverrides})`
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
 4. 若 `requiresStreamForThinking && thinking.enabled`:走 stream,聚合 `reasoning_content`+`content`,末 chunk 取 usage
 5. 调 SDK(带 `AbortController` 总超时 + 流空闲超时)
 6. **若请求了 schema**:对返回 content 本地 `JSON.parse` + schema 校验(`schema-validate.mjs`);失败则按降级链重试(json_schema→json_object→prompt-only),仍失败则交由 failover 视为该模型失败(Codex #7)
-7. 归一化返回 `{ content, parsed?, reasoning, usage:{prompt,completion,reasoning,cached,total}, raw }`
+7. 归一化返回 `{ content, parsed?, reasoning, usage:{prompt,completion,reasoning,cached,total}, raw }`。`raw` **仅进程内使用**(调试),**绝不**经 IPC 回传渲染端、也不原样落日志;若需记录只记脱敏后的 usage/状态。
 
 ### 3.6 failover + retry
 
@@ -139,11 +139,20 @@ export default {
 1. 解析该用途的有序模型链(`purposes[purpose].modelIds`;空→全局启用模型顺序)
 2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
-   - **OpenAI endpoint 内部降级**(同一模型内,不占用 modelIds 链):当 `endpoint:'auto'` 解析为 `responses`,且本次错误被分类为「endpoint/route 不可用」(如 `/responses` 404、该模型不在 Responses 上、未知 route)时,在该模型的尝试预算内**改用 `openai-chat` 重发一次**;仍失败才前进到链上下一个模型。`endpoint` 显式锁定为 `chat`/`responses` 时不做此降级。
-4. 错误分类(`errors.mjs` 的 `classifyError` 看 HTTP status + provider 错误 body/code,返回 `{retryable, retryAfterMs}`,Codex #4):
-   - **重试**:429 **限流**(rate limit)、5xx、网络重置/ECONNRESET、流空闲超时;若响应含 `Retry-After` 头则遵守该等待时长,但**封顶 `retry.maxBackoffMs`**;整条 failover 还受 `retry.totalDeadlineMs` 总超时约束,超过即放弃后续模型,避免某 provider 给出超大 `Retry-After` 把招聘流程拖死
-   - **直接失败换下一个**:鉴权失效、**额度/欠费**(429 中的 quota/insufficient_balance,与限流区分)、不支持参数、不支持 schema/tool、超长、请求格式错误
-5. 全链失败 → 抛出聚合错误(含每个模型的失败原因)
+4. **错误分类驱动状态机**:`classifyError(err)` 看 HTTP status + provider 错误 body/code,返回稳定契约 `{ kind, action, retryAfterMs? }`。`action` 唯一决定下一步:
+
+   | `kind` | 触发场景 | `action` | 行为 |
+   |---|---|---|---|
+   | `rate_limit` | 429 限流 | `retry_same` | 退避后重试同模型;有 `Retry-After` 则遵守,封顶 `retry.maxBackoffMs` |
+   | `server` / `network` / `stream_timeout` | 5xx / ECONNRESET / 流空闲超时 | `retry_same` | 指数退避 + jitter 重试同模型 |
+   | `endpoint_unavailable` | `/responses` 404、模型不在该 route | `endpoint_downgrade` | openai 且 `endpoint:'auto'`→responses 时,同模型预算内改用 `openai-chat` 重发一次;endpoint 显式锁定时退化为 `next_model` |
+   | `unsupported_schema` | 请求时拒绝 `response_format`/`text.format`/schema | `schema_downgrade` | 按 §3.5 降级链(json_schema→json_object→prompt-only)**同模型**重发;降到底仍失败才 `next_model` |
+   | `auth` / `quota` / `unsupported_param` / `context_overflow` / `bad_request` | 鉴权失效、额度欠费(`insufficient_balance`,与限流区分)、不支持参数、超长、格式错误 | `next_model` | 不重试本模型,直接换链上下一个 |
+   | `unknown` | 兜底 | `next_model` | 保守换下一个 |
+
+   - 每模型 `retry_same` 最多 `retry.maxAttemptsPerModel` 次;`endpoint_downgrade` / `schema_downgrade` 在同模型预算内**最多各发生一次**。
+   - 整条 failover 受 `retry.totalDeadlineMs` 总超时约束,超时即放弃后续模型(防止超大 `Retry-After` 拖死招聘流程)。
+5. 全链失败 → 抛出聚合错误(含每个模型的 `kind` + 脱敏原因)
 6. **密钥脱敏(Codex)**:写日志、IPC 返回、聚合错误前,统一经 `redact()` 抹去 `apiKey`、`Authorization` 头、请求体与 provider 错误 payload 中的密钥(只保留前后各 4 位掩码)。错误对象不得携带原始 header/body。
 
 ## 4. 配置 Schema(`boss-llm.json` version 2)
@@ -155,7 +164,7 @@ export default {
     "id": "uuid", "name": "硅基流动", "baseURL": "https://api.siliconflow.cn/v1", "apiKey": "sk-…",
     "models": [{
       "id": "uuid", "name": "R1 简历筛选", "model": "Pro/deepseek-ai/DeepSeek-R1", "enabled": true,
-      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic(用户锁定 dialect family)
+      "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic;只锁定 dialect/provider 适配器,model family 仍按 model id 解析
       "endpoint": "auto",                                // auto | chat | responses;仅 openai 有意义。auto=按模型族解析(推理模型→responses,否则 chat);auto 时遇 route 不可用按 §3.6 内部降级到 chat
       "thinking": { "enabled": true, "budget": 2048, "effort": "medium" },  // budget 仅 budget 类用;effort 仅 openai 用(字符串,取值见 profile.effortValues)
       "sampling": { "temperature": null, "max_tokens": null, "top_p": null,
@@ -225,7 +234,9 @@ export default {
 | `generateRubricFromJd` | `llm-rubric.mjs` | rubric_generation | rubric 生成 JSON Schema |
 | `screenCandidateWithLlm` | `chat-page-processor.mjs` | resume_screening | pass/reason JSON Schema |
 
-`recommend/scorer.mjs` 的 `defaultLlm` 经 `evaluateResumeByRubric` 间接受益。各调用点原先写死的 `max_tokens` 改为按用途默认值或显式 override。`getEnabledLlmClient` 被 failover 链解析取代。
+`recommend/scorer.mjs` 的 `defaultLlm` 经 `evaluateResumeByRubric` 间接受益。`getEnabledLlmClient` 被 failover 链解析取代。
+
+各调用点原先写死的 `max_tokens` 改为**消费层代码常量**(每用途一个默认 token 上限,如 resume_screening≈500、rubric_generation≈2000),作为 `chatCompleteForPurpose(..., { maxOutputTokens })` 显式传入;模型卡上的 `sampling.max_tokens`(用户填写)若非空则覆盖该默认。**不**在 schema 里新增 per-purpose token 字段(YAGNI)。
 
 > `greeting_generation` / `message_rewrite` 为**预留用途**:本次无对应调用点,UI 中可配但运行时这两个用途未被消费;待相应功能落地时再接线。未单独配置的用途(含这两者)运行时回落到 `default` 链。
 
@@ -234,7 +245,9 @@ export default {
 - **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 只发 `thinking.type`、绝不发 `reasoning_effort` —— 单测。
 - **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 档位仅取当前官方文档列出的值(`low`/`medium`/`high`,`minimal` 仅在官方文档明确支持该模型时)。
 - **schema-validate**:合法 JSON 通过、非法触发降级链(json_schema→json_object→prompt-only)、最终失败上抛。
-- **failover**:mock chatComplete,验证重试次数、`classifyError`(限流 vs 额度 vs 鉴权)、`Retry-After` 遵守、jitter 存在、切模型重建请求、全失败聚合。
+- **failover**:mock chatComplete,验证重试次数、`classifyError` 的 `{kind,action}` 映射(限流→retry_same / 额度→next_model / 鉴权→next_model)、`Retry-After` 遵守且被 `maxBackoffMs` 封顶、`totalDeadlineMs` 到点放弃后续模型、jitter 存在、切模型重建请求、全失败聚合(只含脱敏原因)。
+- **endpoint 降级**:openai `endpoint:'auto'`→responses 遇 `endpoint_unavailable` 时,同模型内降级 `openai-chat` 一次;显式锁定 endpoint 时不降级直接换模型。
+- **schema 降级**:请求时 `unsupported_schema` 触发 json_schema→json_object→prompt-only 同模型重发;降到底才换模型(区别于「post-response 校验失败」路径)。
 - **迁移 + 持久化**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试;坏 JSON → 备份+默认;未知字段保留;原子写。
 - **usage 归一化**:含 reasoning/cached tokens。
 - 测试随 `.mjs` 放在各模块旁(沿用现有 `*.test.mjs` 习惯)。
