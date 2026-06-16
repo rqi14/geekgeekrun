@@ -23,6 +23,14 @@ test('missing required key → throws invalid_output', () => {
   assert.throws(() => validateAgainstSchema('{"pass":true}', schema), (e) => e.kind === 'invalid_output')
 })
 
+test('non-object JSON (false) with required keys → invalid_output (not raw TypeError)', () => {
+  assert.throws(() => validateAgainstSchema('false', schema), (e) => e.kind === 'invalid_output')
+})
+
+test('non-object JSON (string) with required keys → invalid_output', () => {
+  assert.throws(() => validateAgainstSchema('"no"', schema), (e) => e.kind === 'invalid_output')
+})
+
 test('no schema → parse only, returns parsed', () => {
   assert.deepEqual(validateAgainstSchema('{"a":1}', null), { a: 1 })
 })
