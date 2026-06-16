@@ -59,7 +59,17 @@ export async function chatComplete (model, messages, opts = {}) {
   const schemaMode = opts.schemaMode ?? initSchemaMode(schema, profile)
 
   const sampling = mergeSampling(model, opts.sampling)
-  const tokenLimit = typeof sampling.max_tokens === 'number' ? sampling.max_tokens : opts.maxOutputTokens
+  // 用户在高级参数显式填的 max_tokens 原样尊重;否则用用途默认(maxOutputTokens)。
+  const userMaxTokens = typeof sampling.max_tokens === 'number' ? sampling.max_tokens : null
+  let tokenLimit = userMaxTokens ?? opts.maxOutputTokens
+  // 推理模型:用途默认是「期望输出长度」,需在其上预留 reasoning 空间,否则 completion 上限
+  // 低于 thinking 预算会被截断/拒绝(如 DeepSeek-R1 + resume_screening=500)。仅对默认值加,
+  // 用户显式值不动(用户自负其责)。
+  const isReasoning = family.isReasoningModel || !!(model.thinking && model.thinking.enabled)
+  if (userMaxTokens === null && isReasoning && typeof tokenLimit === 'number') {
+    const budget = typeof model.thinking?.budget === 'number' ? model.thinking.budget : 2048
+    tokenLimit = tokenLimit + budget
+  }
   // max_tokens 已并入 tokenLimit,避免 buildRequest 重复写采样
   const samplingForBuild = { ...sampling }
   delete samplingForBuild.max_tokens

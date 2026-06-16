@@ -31,14 +31,15 @@ test('builds generic request, returns normalized result with parsed + usage', as
     schema, schemaMode: 'json_object', maxOutputTokens: 500, _clientFactory: fakeClientFactory(captured)
   })
   assert.equal(captured.req.enable_thinking, true)
-  assert.equal(captured.req.max_tokens, 500)
+  // 推理模型 + 默认用途上限 500 → 预留 thinking 预算 2048 → 2548(避免截断)
+  assert.equal(captured.req.max_tokens, 2548)
   assert.deepEqual(r.parsed, { pass: true, reason: 'ok' })
   assert.equal(r.usage.prompt, 10)
   assert.equal(r.reasoning, 'because')
   assert.ok(r.raw)
 })
 
-test('user sampling.max_tokens overrides maxOutputTokens', async () => {
+test('explicit user sampling.max_tokens honored verbatim (no reasoning headroom added)', async () => {
   const captured = {}
   await chatComplete(
     { ...model, thinking: { enabled: false }, sampling: { max_tokens: 999 } },
@@ -46,6 +47,16 @@ test('user sampling.max_tokens overrides maxOutputTokens', async () => {
     { schemaMode: 'none', maxOutputTokens: 500, _clientFactory: fakeClientFactory(captured) }
   )
   assert.equal(captured.req.max_tokens, 999)
+})
+
+test('non-reasoning model: purpose default used as-is (no headroom)', async () => {
+  const captured = {}
+  await chatComplete(
+    { baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'sk', model: 'qwen-plus', brand: 'auto', endpoint: 'auto', thinking: { enabled: false }, sampling: {} },
+    [{ role: 'user', content: 'hi' }],
+    { schemaMode: 'none', maxOutputTokens: 500, _clientFactory: fakeClientFactory(captured) }
+  )
+  assert.equal(captured.req.max_tokens, 500)
 })
 
 test('invalid json throws LlmError invalid_output', async () => {
