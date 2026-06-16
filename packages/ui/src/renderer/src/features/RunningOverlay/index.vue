@@ -242,11 +242,14 @@ defineExpose({
   show,
   hide
 })
-ipcRenderer.on('worker-exited', (ev, payload) => {
-  const { workerId, code } = payload
+function workerExitedHandler(
+  _ev: unknown,
+  payload: { workerId?: string; code?: number; runRecordId?: number | null }
+) {
+  const { workerId, code, runRecordId } = payload
   if (
-    workerId !== props.workerId
-    // || runRecordId !== props.runRecordId
+    workerId !== props.workerId ||
+    (runRecordId != null && props.runRecordId != null && runRecordId !== props.runRecordId)
   ) {
     return
   }
@@ -263,7 +266,9 @@ ipcRenderer.on('worker-exited', (ev, payload) => {
       workerId: props.workerId
     })
   }
-})
+}
+const unListenWorkerExited = ipcRenderer.on('worker-exited', workerExitedHandler)
+onUnmounted(unListenWorkerExited)
 </script>
 
 <style lang="scss">

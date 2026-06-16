@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { resolve } from 'path'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 import {
   ensureStorageFileExist,
   writeStorageFile,
@@ -35,9 +36,7 @@ export async function launchDaemon() {
       {
         stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
         detached: true,
-        env: {
-          ...process.env
-        }
+        env: buildUtf8ProcessEnv(process.env)
       }
     )
 

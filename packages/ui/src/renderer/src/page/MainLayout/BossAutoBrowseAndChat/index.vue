@@ -203,7 +203,7 @@ onMounted(async () => {
     formContent.recommendClickNotInterestedForFiltered =
       recommendPage.clickNotInterestedForFiltered ?? true
     formContent.recommendSkipViewedCandidates = recommendPage.skipViewedCandidates ?? false
-    formContent.recommendRerunIntervalMs = recommendPage.rerunIntervalMs ?? 3000
+    formContent.recommendRerunIntervalMs = recommendPage.rerunIntervalMs ?? 600000
     formContent.recommendDelayBetweenNotInterestedMs =
       Array.isArray(recommendPage.delayBetweenNotInterestedMs) &&
       recommendPage.delayBetweenNotInterestedMs.length >= 2

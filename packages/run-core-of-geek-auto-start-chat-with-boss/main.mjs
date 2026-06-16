@@ -1,3 +1,4 @@
+import '@geekgeekrun/utils/process-text-encoding-register.mjs'
 import DingtalkPlugin from '@geekgeekrun/dingtalk-plugin/index.mjs'
 import { mainLoop, closeBrowserWindow } from '@geekgeekrun/geek-auto-start-chat-with-boss/index.mjs'
 import {

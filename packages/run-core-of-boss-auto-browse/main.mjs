@@ -1,3 +1,4 @@
+import '@geekgeekrun/utils/process-text-encoding-register.mjs'
 import startBossAutoBrowse from '@geekgeekrun/boss-auto-browse-and-chat/index.mjs'
 import { readConfigFile } from '@geekgeekrun/boss-auto-browse-and-chat/runtime-file-utils.mjs'
 import {
