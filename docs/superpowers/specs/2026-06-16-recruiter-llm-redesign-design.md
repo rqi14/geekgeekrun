@@ -72,7 +72,7 @@ export default {
   label: '通义千问 Qwen',
   match({ baseURL, endpoint }) { /* 仅看 baseURL / endpoint 锁定 */ return boolean },
   buildRequest({ family, thinking, sampling, schema, schemaMode, messages, tokenLimit }) { /* 套本 dialect 线格式;按 schemaMode 决定结构化形态,不自循环降级 */ },
-  buildStructuredOutput({ schema, schemaMode, family }) { /* dialect 专属:json_schema→Chat response_format / Responses text.format;json_object→对应 json mode;prompt-only→不带结构化字段、靠 prompt(Codex #5) */ },
+  buildStructuredOutput({ schema, schemaMode, family }) { /* dialect 专属:json_schema→Chat response_format / Responses text.format;json_object→对应 json mode;prompt-only→不带结构化字段,改把 schema 描述注入 system/末条 user 提示。任何模式下 §3.5 步骤 6 的本地校验照常生效(Codex #5) */ },
   parseResponse(raw) { /* 归一化 content/reasoning/usage */ }
 }
 ```
@@ -124,7 +124,7 @@ export default {
 
 ### 3.5 chatComplete(单次调用)
 
-`chatComplete(model, messages, { purpose, schema, sampling, maxOutputTokens, schemaMode })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`)。`maxOutputTokens` = 用途默认 token 上限(由 `chatCompleteForPurpose` 透传,见 §6);buildRequest 时若 `model.sampling.max_tokens` 非空则以用户值覆盖,否则用 `maxOutputTokens`,再按 §3.3 的 `tokenLimitField` 写入正确字段名。`schemaMode ∈ {json_schema,json_object,prompt-only}` 是**当前降级游标**(默认 = `min(profile.structuredOutput, schema 存在性)`);**`chatComplete` 不自行循环降级**,只按本次 `schemaMode` 构造一次——降级由 §3.6 failover 递减 `schemaMode` 后重新调用本函数驱动(`profile.structuredOutput` 仅作能力上限,非游标):
+`chatComplete(model, messages, { purpose, schema, sampling, maxOutputTokens, schemaMode })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`)。`maxOutputTokens` = 用途默认 token 上限(由 `chatCompleteForPurpose` 透传,见 §6)。**sampling 合并次序**:`effective = { ...model.sampling(用户配置), ...opts.sampling(调用点覆盖,通常为空) }`,再 strip `profile.unsupportedSampling`。**token 上限取值优先级**:`effective.max_tokens`(非空)> `maxOutputTokens`,得到的数值按 §3.3 的 `tokenLimitField` 写入正确字段名。`schemaMode ∈ {none,json_schema,json_object,prompt-only}` 是**当前降级游标**,初值映射:**无 `schema`** → `none`(不启用结构化输出);有 `schema` 且 `profile.structuredOutput==='none'` → `prompt-only`;否则 = `profile.structuredOutput`(`json_schema`/`json_object`)。**`chatComplete` 不自行循环降级**,只按本次 `schemaMode` 构造一次——降级由 §3.6 failover 递减 `schemaMode` 后重新调用本函数驱动(`profile.structuredOutput` 仅作能力上限,非游标):
 1. `family = resolveModelFamily(model.model)`(先解析 family,供下一步用)
 2. `dialect = resolveDialect({baseURL: model.baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` **只锁定 dialect / provider 适配器**,model family 仍由步骤 1 的 `resolveModelFamily(model.model)` 解析,两者正交;openai 适配器组再按 `endpoint`(auto→由 family 选 chat/responses)定具体 dialect);`profile = resolveModelProfile({dialect, family, userOverrides})`
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5)**按本次 `schemaMode`** 构造对应形态(json_schema / json_object / prompt-only 之一,不在此处循环降级)
@@ -193,7 +193,7 @@ export default {
 **持久化硬化(Codex #6)**:
 - **严格 JSON**:读用 `JSON.parse`(不用 JSON5),解析失败 → 不静默丢弃,改用 `.bak` 备份原文件后再写默认值。
 - **schema 校验**(区分两类):
-  - **未知字段**(schema 未定义的键)→ **原样保留**(向前兼容更新版本写的配置)。
+  - **未知字段**(schema 未定义的键)→ **原样保留**(向前兼容更新版本写的配置)。为此 v2 校验器在对象层级**允许 passthrough 未知键**(非 strict 模式),不得因保留字段而判整份配置非法。
   - **已知字段但值非法**(如 `endpoint` 非 auto/chat/responses、retry 负数、sampling 非数字)→ 记日志 + **回落该字段默认值**(不丢整份配置),保证产物合法。
 - **原子写**:写临时文件 → `fsync` → `rename` 覆盖,避免半截文件。
 - **写前自动备份**:迁移落盘前先把旧文件复制为 `boss-llm.json.bak`,迁移异常可回滚。
