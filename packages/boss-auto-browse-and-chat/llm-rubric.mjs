@@ -5,11 +5,23 @@
  * Used when resumeLlmConfig.rubric is present in job filter.
  */
 
-import { readConfigFile } from './runtime-file-utils.mjs'
+import { readConfigFile, readBossLlmConfig } from './runtime-file-utils.mjs'
 import { debug as logDebug, info as logInfo, warn as logWarn, error as logError } from './logger.mjs'
 
 const RESUME_TEXT_MAX_CHARS = 3500
 const LOG = '[llm-rubric]'
+
+const RESUME_SCREENING_MAX_TOKENS = 500
+const RUBRIC_GENERATION_MAX_TOKENS = 2000
+
+// 测试缝：默认用真实新层，测试可注入
+let _chatCompleteForPurpose = null
+export function __setChatCompleteForPurpose (fn) { _chatCompleteForPurpose = fn }
+async function callLayer (config, purpose, messages, opts) {
+  if (_chatCompleteForPurpose) return _chatCompleteForPurpose(config, purpose, messages, opts)
+  const { chatCompleteForPurpose } = await import('./llm/failover.mjs')
+  return chatCompleteForPurpose(config, purpose, messages, opts)
+}
 
 /**
  * 将 providers 数组展开为 flat model 列表，每个 model 携带所属 provider 的 baseURL/apiKey。
@@ -93,10 +105,7 @@ export function getEnabledLlmClient (purpose = 'resume_screening', preferModelId
  */
 export async function evaluateResumeByRubric (resumeText, rubricConfig, options = {}) {
   const defaultResult = { isPassed: true, totalScore: 0, reason: 'LLM 调用失败，默认通过' }
-  const modelId = typeof options?.modelId === 'string' ? options.modelId : null
-  const client = getEnabledLlmClient('resume_screening', modelId)
-  if (!client) return defaultResult
-
+  // 模型由 failover 链按用途解析（options.modelId 已废弃，保留签名兼容）
   const knockouts = Array.isArray(rubricConfig?.knockouts) ? rubricConfig.knockouts : []
   const dimensions = Array.isArray(rubricConfig?.dimensions) ? rubricConfig.dimensions : []
   const passThreshold = typeof rubricConfig?.passThreshold === 'number' ? rubricConfig.passThreshold : 75
@@ -137,35 +146,35 @@ ${dimensionsDesc}
     systemContent += `\n\n【评分说明】\n${scoringNote}`
   }
 
+  const schema = {
+    name: 'rubric_eval',
+    schema: {
+      type: 'object',
+      required: ['knockout_failed', 'dimension_scores'],
+      properties: {
+        knockout_failed: { type: 'boolean' },
+        knockout_reason: { type: 'string' },
+        dimension_scores: { type: 'object' },
+        reasoning: { type: 'string' }
+      }
+    }
+  }
   try {
     logInfo(LOG, 'evaluateResumeByRubric start', {
-      model: client.model,
       resumeChars: truncatedResume.length,
       dims: dimensions.length,
       knockouts: knockouts.length,
       passThreshold
     })
-    const { completes } = await import('@geekgeekrun/utils/gpt-request.mjs')
-    const completion = await completes(
-      {
-        baseURL: client.baseURL,
-        apiKey: client.apiKey,
-        model: client.model,
-        max_tokens: 500,
-        response_format: { type: 'json_object' }
-      },
-      [
-        { role: 'system', content: systemContent },
-        { role: 'user', content: truncatedResume }
-      ]
-    )
+    const config = readBossLlmConfig()
+    const result = await callLayer(config, 'resume_screening', [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: truncatedResume }
+    ], { schema, maxOutputTokens: RESUME_SCREENING_MAX_TOKENS })
 
-    const raw = completion?.choices?.[0]?.message?.content?.trim()
-    logDebug(LOG, 'evaluateResumeByRubric raw length', raw?.length ?? 0)
-    if (!raw) return defaultResult
-
-    const jsonStr = raw.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
-    const parsed = JSON.parse(jsonStr)
+    const parsed = result?.parsed
+    logDebug(LOG, 'evaluateResumeByRubric parsed?', !!parsed)
+    if (!parsed) return defaultResult
 
     if (parsed.knockout_failed === true) {
       return {
@@ -215,11 +224,7 @@ export async function generateRubricFromJd (sourceJd, options = {}) {
       { name: '综合匹配度', weight: 100, criteria: { '1': '不符合', '3': '部分符合', '5': '完全符合' } }
     ]
   }
-  // 允许为“Rubric 生成”单独指定模型；旧配置未配置 rubric_generation 时，会自动回退到 default/第一个启用模型
-  const modelId = typeof options?.modelId === 'string' ? options.modelId : null
-  const client = getEnabledLlmClient('rubric_generation', modelId)
-  if (!client) return { rubric: defaultRubric }
-
+  // 模型由 failover 链按 rubric_generation 用途解析（options.modelId 已废弃，保留签名兼容）
   const systemContent = `你是一个资深 HR，擅长将招聘需求转化为可量化的候选人评分体系（Rubric）。
 
 请仔细阅读用户提供的岗位描述（JD），从中提取并生成：
@@ -256,27 +261,20 @@ export async function generateRubricFromJd (sourceJd, options = {}) {
   ]
 }`
 
+  const schema = {
+    name: 'rubric_gen',
+    schema: { type: 'object', required: ['dimensions'], properties: { knockouts: { type: 'array' }, dimensions: { type: 'array' } } }
+  }
   try {
-    logInfo(LOG, 'generateRubricFromJd start', { model: client.model, jdChars: String(sourceJd || '').length })
-    const { completes } = await import('@geekgeekrun/utils/gpt-request.mjs')
-    const completion = await completes(
-      {
-        baseURL: client.baseURL,
-        apiKey: client.apiKey,
-        model: client.model,
-        max_tokens: 2000,
-        response_format: { type: 'json_object' }
-      },
-      [
-        { role: 'system', content: systemContent },
-        { role: 'user', content: sourceJd || '（请输入岗位描述）' }
-      ]
-    )
-    const raw = completion?.choices?.[0]?.message?.content?.trim()
-    logDebug(LOG, 'generateRubricFromJd raw length', raw?.length ?? 0)
-    if (!raw) return { rubric: defaultRubric }
-    const jsonStr = raw.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
-    const parsed = JSON.parse(jsonStr)
+    logInfo(LOG, 'generateRubricFromJd start', { jdChars: String(sourceJd || '').length })
+    const config = readBossLlmConfig()
+    const result = await callLayer(config, 'rubric_generation', [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: sourceJd || '（请输入岗位描述）' }
+    ], { schema, maxOutputTokens: RUBRIC_GENERATION_MAX_TOKENS })
+    const parsed = result?.parsed
+    logDebug(LOG, 'generateRubricFromJd parsed?', !!parsed)
+    if (!parsed) return { rubric: defaultRubric }
 
     const knockouts = Array.isArray(parsed.knockouts)
       ? parsed.knockouts.filter((k) => typeof k === 'string').slice(0, 5)

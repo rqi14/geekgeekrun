@@ -136,33 +136,23 @@ function filterFontTestLines (lines) {
 export async function screenCandidateWithLlm (resumeText, llmRule) {
   const defaultResult = { pass: true, reason: 'LLM 调用失败，默认通过' }
   try {
-    const { getEnabledLlmClient } = await import('./llm-rubric.mjs')
-    const client = getEnabledLlmClient()
-    if (!client) return defaultResult
-
-    const { completes } = await import('@geekgeekrun/utils/gpt-request.mjs')
+    const { readBossLlmConfig } = await import('./runtime-file-utils.mjs')
+    const { chatCompleteForPurpose } = await import('./llm/failover.mjs')
+    const config = readBossLlmConfig()
     const systemContent = `你是一个招聘筛选助手。根据以下筛选规则，判断候选人简历是否符合要求。
 筛选规则：${llmRule || '无'}
 请仅以JSON格式回复，不要包含其他内容。格式：{"pass": true或false, "reason": "判断理由"}`
-    const completion = await completes(
-      {
-        baseURL: client.baseURL,
-        apiKey: client.apiKey,
-        model: client.model,
-        max_tokens: 200
-      },
-      [
-        { role: 'system', content: systemContent },
-        { role: 'user', content: (resumeText || '（无简历内容）').slice(0, 3500) }
-      ]
-    )
-    const raw = completion?.choices?.[0]?.message?.content?.trim()
-    if (!raw) return defaultResult
-    const jsonStr = raw.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
-    const parsed = JSON.parse(jsonStr)
-    const pass = !!parsed.pass
-    const reason = typeof parsed.reason === 'string' ? parsed.reason : ''
-    return { pass, reason }
+    const schema = {
+      name: 'screen',
+      schema: { type: 'object', required: ['pass'], properties: { pass: { type: 'boolean' }, reason: { type: 'string' } } }
+    }
+    const r = await chatCompleteForPurpose(config, 'resume_screening', [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: (resumeText || '（无简历内容）').slice(0, 3500) }
+    ], { schema, maxOutputTokens: 200 })
+    const parsed = r?.parsed
+    if (!parsed) return defaultResult
+    return { pass: !!parsed.pass, reason: typeof parsed.reason === 'string' ? parsed.reason : '' }
   } catch (err) {
     logWarn(`${LOG} screenCandidateWithLlm 失败:`, err.message)
     return defaultResult
