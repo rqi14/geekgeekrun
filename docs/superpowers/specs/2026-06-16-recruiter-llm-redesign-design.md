@@ -82,7 +82,7 @@ export default {
   isReasoningModel: boolean,           // 由 model id 推断(qwq / -thinking / reasoner / o\d / gpt-5 …)
   ignoresSampling: ['temperature','top_p','frequency_penalty','presence_penalty'] | [],
   structuredOutputCap: 'json_schema' | 'json_object' | 'none',  // 该模型最高支持级别
-  effortValues?: ['low','medium','high']  // 仅 reasoning_effort 类;按当前官方文档,不含 none/xhigh(Codex #1)
+  effortValues?: ['low','medium','high']  // 仅 reasoning_effort 类;以当前 OpenAI 官方文档列出的档位为准(Codex #1)
 }
 ```
 
@@ -118,7 +118,7 @@ export default {
 | **Qwen / DashScope** | Node openai SDK 用**顶层**字段 `enable_thinking`/`thinking_budget`(`extra_body` 是 Python 写法) | thinking 时**必须 stream**,适配器内部 stream + 聚合;`stream_options.include_usage` 取用量;生产固定快照,不用 `-latest` |
 | **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type}` **或** `reasoning_effort` —— **二选一,绝不同时发**(Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
 | **GLM / 智谱** | `thinking:{ type:'enabled'\|'disabled' }`(字符串,非 bool) | GLM-4.5 默认动态思考 |
-| **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前官方文档列出该模型支持时提供;**不含** `none`/`xhigh`(Codex #1) |
+| **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前 OpenAI 官方文档明确列出该模型支持时才提供;不引入官方文档未列出的档位(Codex #1) |
 | **火山方舟 Volc Ark** | 单独建档,按其文档确认字段 | 不与 SiliconFlow 混 |
 
 ### 3.5 chatComplete(单次调用)
@@ -224,7 +224,7 @@ export default {
 ## 7. 测试策略
 
 - **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 `thinking.type` 与 `reasoning_effort` 互斥 —— 单测。
-- **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 仅 low/medium/high(+按模型 minimal)。
+- **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 档位仅取当前官方文档列出的值(`low`/`medium`/`high`,`minimal` 仅在官方文档明确支持该模型时)。
 - **schema-validate**:合法 JSON 通过、非法触发降级链(json_schema→json_object→prompt-only)、最终失败上抛。
 - **failover**:mock chatComplete,验证重试次数、`classifyError`(限流 vs 额度 vs 鉴权)、`Retry-After` 遵守、jitter 存在、切模型重建请求、全失败聚合。
 - **迁移 + 持久化**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试;坏 JSON → 备份+默认;未知字段保留;原子写。
