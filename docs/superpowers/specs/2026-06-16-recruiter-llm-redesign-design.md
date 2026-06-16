@@ -70,7 +70,7 @@ packages/boss-auto-browse-and-chat/llm/
 export default {
   id: 'qwen',
   label: '通义千问 Qwen',
-  match({ baseURL, endpointHint }) { /* 仅看 baseURL/endpoint */ return boolean },
+  match({ baseURL, endpoint }) { /* 仅看 baseURL / endpoint 锁定 */ return boolean },
   buildRequest({ family, thinking, sampling, schema, messages, tokenLimit }) { /* 套本 dialect 线格式 */ },
   buildStructuredOutput({ schema, family }) { /* dialect 专属:Chat 用 response_format,Responses 用 text.format(Codex #5) */ },
   parseResponse(raw) { /* 归一化 content/reasoning/usage */ }
@@ -124,9 +124,9 @@ export default {
 
 ### 3.5 chatComplete(单次调用)
 
-`chatComplete(model, messages, { purpose, schema, sampling })`:
-1. `dialect = resolveDialect({baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` 锁定 dialect family;openai 族再按 `endpoint`(auto→family 选 chat/responses)定具体 dialect)
-2. `family = resolveModelFamily(model.model)`;`profile = resolveModelProfile({dialect, family, userOverrides})`
+`chatComplete(model, messages, { purpose, schema, sampling })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`):
+1. `family = resolveModelFamily(model.model)`(先解析 family,供下一步用)
+2. `dialect = resolveDialect({baseURL: model.baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` 锁定 dialect family;openai 族再按 `endpoint`(auto→由 family 选 chat/responses)定具体 dialect);`profile = resolveModelProfile({dialect, family, userOverrides})`
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
 4. 若 `requiresStreamForThinking && thinking.enabled`:走 stream,聚合 `reasoning_content`+`content`,末 chunk 取 usage
 5. 调 SDK(带 `AbortController` 总超时 + 流空闲超时)
@@ -139,10 +139,12 @@ export default {
 1. 解析该用途的有序模型链(`purposes[purpose].modelIds`;空→全局启用模型顺序)
 2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
+   - **OpenAI endpoint 内部降级**(同一模型内,不占用 modelIds 链):当 `endpoint:'auto'` 解析为 `responses`,且本次错误被分类为「endpoint/route 不可用」(如 `/responses` 404、该模型不在 Responses 上、未知 route)时,在该模型的尝试预算内**改用 `openai-chat` 重发一次**;仍失败才前进到链上下一个模型。`endpoint` 显式锁定为 `chat`/`responses` 时不做此降级。
 4. 错误分类(`errors.mjs` 的 `classifyError` 看 HTTP status + provider 错误 body/code,返回 `{retryable, retryAfterMs}`,Codex #4):
-   - **重试**:429 **限流**(rate limit)、5xx、网络重置/ECONNRESET、流空闲超时;若响应含 `Retry-After` 头则**遵守**该等待时长
+   - **重试**:429 **限流**(rate limit)、5xx、网络重置/ECONNRESET、流空闲超时;若响应含 `Retry-After` 头则遵守该等待时长,但**封顶 `retry.maxBackoffMs`**;整条 failover 还受 `retry.totalDeadlineMs` 总超时约束,超过即放弃后续模型,避免某 provider 给出超大 `Retry-After` 把招聘流程拖死
    - **直接失败换下一个**:鉴权失效、**额度/欠费**(429 中的 quota/insufficient_balance,与限流区分)、不支持参数、不支持 schema/tool、超长、请求格式错误
 5. 全链失败 → 抛出聚合错误(含每个模型的失败原因)
+6. **密钥脱敏(Codex)**:写日志、IPC 返回、聚合错误前,统一经 `redact()` 抹去 `apiKey`、`Authorization` 头、请求体与 provider 错误 payload 中的密钥(只保留前后各 4 位掩码)。错误对象不得携带原始 header/body。
 
 ## 4. 配置 Schema(`boss-llm.json` version 2)
 
@@ -154,7 +156,7 @@ export default {
     "models": [{
       "id": "uuid", "name": "R1 简历筛选", "model": "Pro/deepseek-ai/DeepSeek-R1", "enabled": true,
       "brand": "auto",                                   // auto | qwen | deepseek | glm | openai | volc | generic(用户锁定 dialect family)
-      "endpoint": "auto",                                // auto | chat | responses;仅 openai 有意义。auto=按模型族解析(推理模型→responses,否则 chat),失败时 failover 可回退 chat
+      "endpoint": "auto",                                // auto | chat | responses;仅 openai 有意义。auto=按模型族解析(推理模型→responses,否则 chat);auto 时遇 route 不可用按 §3.6 内部降级到 chat
       "thinking": { "enabled": true, "budget": 2048, "effort": "medium" },  // budget 仅 budget 类用;effort 仅 openai 用(字符串,取值见 profile.effortValues)
       "sampling": { "temperature": null, "max_tokens": null, "top_p": null,
                     "frequency_penalty": null, "presence_penalty": null }  // null=不传
@@ -163,11 +165,11 @@ export default {
   "purposes": {
     "resume_screening":   { "modelIds": [] },
     "rubric_generation":  { "modelIds": [] },
-    "greeting_generation":{ "modelIds": [] },
-    "message_rewrite":    { "modelIds": [] },
+    "greeting_generation":{ "modelIds": [] },   // 预留:暂无消费方,未配置时回落 default
+    "message_rewrite":    { "modelIds": [] },   // 预留:暂无消费方,未配置时回落 default
     "default":            { "modelIds": [] }
   },
-  "retry": { "maxAttemptsPerModel": 2, "backoffMs": 500 }
+  "retry": { "maxAttemptsPerModel": 2, "backoffMs": 500, "maxBackoffMs": 20000, "totalDeadlineMs": 120000 }
 }
 ```
 
@@ -208,7 +210,7 @@ export default {
 - 空 = "跟随全局启用顺序"兜底
 
 ### Tab 3「通用」
-- retry 设置:`maxAttemptsPerModel`、`backoffMs`
+- retry 设置:`maxAttemptsPerModel`、`backoffMs`、`maxBackoffMs`、`totalDeadlineMs`
 
 ### IPC
 - 复用 `boss-fetch-llm-config` / `boss-save-llm-config` / `boss-test-llm-endpoint`(返回结构按新 schema)。
@@ -224,6 +226,8 @@ export default {
 | `screenCandidateWithLlm` | `chat-page-processor.mjs` | resume_screening | pass/reason JSON Schema |
 
 `recommend/scorer.mjs` 的 `defaultLlm` 经 `evaluateResumeByRubric` 间接受益。各调用点原先写死的 `max_tokens` 改为按用途默认值或显式 override。`getEnabledLlmClient` 被 failover 链解析取代。
+
+> `greeting_generation` / `message_rewrite` 为**预留用途**:本次无对应调用点,UI 中可配但运行时这两个用途未被消费;待相应功能落地时再接线。未单独配置的用途(含这两者)运行时回落到 `default` 链。
 
 ## 7. 测试策略
 
