@@ -27,6 +27,13 @@ test('qwen: top-level enable_thinking (not extra_body), stream when thinking', (
   assert.ok(req.stream_options && req.stream_options.include_usage === true)
 })
 
+test('qwen: thinking off → explicit enable_thinking:false, no stream', () => {
+  const f = resolveModelFamily('qwen-plus')
+  const req = qwen.buildRequest({ family: f, thinking: { enabled: false }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 500, model: 'qwen-plus' })
+  assert.equal(req.enable_thinking, false)
+  assert.equal('stream' in req, false)
+})
+
 test('deepseek V4: thinking.type only, never reasoning_effort', () => {
   const f = resolveModelFamily('deepseek-chat')
   const req = deepseek.buildRequest({ family: f, thinking: { enabled: true }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 500, model: 'deepseek-chat' })
