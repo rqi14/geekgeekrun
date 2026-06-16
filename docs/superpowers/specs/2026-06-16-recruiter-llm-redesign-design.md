@@ -124,7 +124,7 @@ export default {
 
 ### 3.5 chatComplete(单次调用)
 
-`chatComplete(model, messages, { purpose, schema, sampling })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`):
+`chatComplete(model, messages, { purpose, schema, sampling, maxOutputTokens })`(`model` 是已 hydrate 的「provider+model 合并对象」,携带 `baseURL`/`apiKey`/`model`/`brand`/`endpoint`/`thinking`/`sampling`)。`maxOutputTokens` = 用途默认 token 上限(由 `chatCompleteForPurpose` 透传,见 §6);buildRequest 时若 `model.sampling.max_tokens` 非空则以用户值覆盖,否则用 `maxOutputTokens`,再按 §3.3 的 `tokenLimitField` 写入正确字段名:
 1. `family = resolveModelFamily(model.model)`(先解析 family,供下一步用)
 2. `dialect = resolveDialect({baseURL: model.baseURL, brandLock: model.brand, endpoint: model.endpoint, family})`(`brand!=='auto'` **只锁定 dialect / provider 适配器**,model family 仍由步骤 1 的 `resolveModelFamily(model.model)` 解析,两者正交;openai 适配器组再按 `endpoint`(auto→由 family 选 chat/responses)定具体 dialect);`profile = resolveModelProfile({dialect, family, userOverrides})`
 3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
@@ -137,7 +137,7 @@ export default {
 
 `chatCompleteForPurpose(config, purpose, messages, opts)`:
 1. 解析该用途的有序模型链,**三级回落**:`purposes[purpose].modelIds`(非空)→ `purposes.default.modelIds`(非空)→ 全局启用模型(`enabled:true`)的声明顺序。
-2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
+2. 逐模型尝试,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4);每模型的尝试预算口径统一见步骤 4(`maxAttemptsPerModel` **仅**约束 `retry_same`,确定性降级不计入)
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
 4. **错误分类驱动状态机**:`classifyError(err)` 看 HTTP status + provider 错误 body/code(以及本地抛出的校验错误,如 §3.5 步骤 6 的输出校验失败),返回稳定契约 `{ kind, action, retryAfterMs? }`。`action` 唯一决定下一步:
 
@@ -145,7 +145,7 @@ export default {
    |---|---|---|---|
    | `rate_limit` | 429 限流 | `retry_same` | 退避后重试同模型;有 `Retry-After` 则遵守,封顶 `retry.maxBackoffMs` |
    | `server` / `network` / `stream_timeout` | 5xx / ECONNRESET / 流空闲超时 | `retry_same` | 指数退避 + jitter 重试同模型 |
-   | `endpoint_unavailable` | `/responses` 404、模型不在该 route | `endpoint_downgrade` | openai 且 `endpoint:'auto'`→responses 时,同模型预算内改用 `openai-chat` 重发一次;endpoint 显式锁定时退化为 `next_model` |
+   | `endpoint_unavailable` | `/responses` 404、模型不在该 route | `endpoint_downgrade` | openai 且 `endpoint:'auto'`→responses 时,同模型内改用 `openai-chat` 重发一次(不计入 `maxAttemptsPerModel`);endpoint 显式锁定时退化为 `next_model` |
    | `unsupported_schema` | 请求时拒绝 `response_format`/`text.format`/schema | `schema_downgrade` | 按 §3.5 降级链(json_schema→json_object→prompt-only)**同模型**重发;降到底仍失败才 `next_model` |
    | `invalid_output` | 请求成功但返回内容**本地 `JSON.parse`/schema 校验失败**(§3.5 步骤 6) | `schema_downgrade` → `next_model` | 先在同模型内按降级链重发(可能模型不守 schema);降到底仍非法则 `next_model` |
    | `auth` / `quota` / `unsupported_param` / `context_overflow` / `bad_request` | 鉴权失效、额度欠费(`insufficient_balance`,与限流区分)、不支持参数、超长、格式错误 | `next_model` | 不重试本模型,直接换链上下一个 |
@@ -175,8 +175,8 @@ export default {
   "purposes": {
     "resume_screening":   { "modelIds": [] },
     "rubric_generation":  { "modelIds": [] },
-    "greeting_generation":{ "modelIds": [] },   // 预留:暂无消费方,未配置时回落 default
-    "message_rewrite":    { "modelIds": [] },   // 预留:暂无消费方,未配置时回落 default
+    "greeting_generation":{ "modelIds": [] },   // 预留:暂无消费方;留空按三级回落(default→全局启用顺序,见 §3.6)
+    "message_rewrite":    { "modelIds": [] },   // 预留:暂无消费方;留空按三级回落(default→全局启用顺序,见 §3.6)
     "default":            { "modelIds": [] }
   },
   "retry": { "maxAttemptsPerModel": 2, "backoffMs": 500, "maxBackoffMs": 20000, "totalDeadlineMs": 120000 }
