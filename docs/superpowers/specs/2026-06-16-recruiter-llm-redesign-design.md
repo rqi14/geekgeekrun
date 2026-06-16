@@ -120,7 +120,7 @@ export default {
 | **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type:'enabled'\|'disabled'}`(本项目对 V4 **统一只用 thinking_type**;DeepSeek API 亦提供 `reasoning_effort`,但为单一代码路径不采用,避免与 thinking_type 同发,Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
 | **GLM / 智谱** | `thinking:{ type:'enabled'\|'disabled' }`(字符串,非 bool) | GLM-4.5 默认动态思考 |
 | **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前 OpenAI 官方文档明确列出该模型支持时才提供;不引入官方文档未列出的档位(Codex #1) |
-| **火山方舟 Volc Ark** | v1 经 `generic`(Ark OpenAI 兼容,顶层 enable_thinking) | 专用 dialect 字段未核实,推迟到 v1 之后单独建档;**不**与 SiliconFlow 共用「确认过」的语义 |
+| _(火山方舟 Ark — v1 **非独立 dialect**,走上面的 `generic`)_ | 同 `generic`:顶层 `enable_thinking` | 专用 dialect 字段未核实,推迟到 v1 之后单独建档(见 §9);此处仅说明 v1 归属,不是新增 dialect |
 
 ### 3.5 chatComplete(单次调用)
 
@@ -136,7 +136,7 @@ export default {
 ### 3.6 failover + retry
 
 `chatCompleteForPurpose(config, purpose, messages, opts)`:
-1. 解析该用途的有序模型链(`purposes[purpose].modelIds`;空→全局启用模型顺序)
+1. 解析该用途的有序模型链,**三级回落**:`purposes[purpose].modelIds`(非空)→ `purposes.default.modelIds`(非空)→ 全局启用模型(`enabled:true`)的声明顺序。
 2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
 4. **错误分类驱动状态机**:`classifyError(err)` 看 HTTP status + provider 错误 body/code(以及本地抛出的校验错误,如 §3.5 步骤 6 的输出校验失败),返回稳定契约 `{ kind, action, retryAfterMs? }`。`action` 唯一决定下一步:
@@ -151,7 +151,7 @@ export default {
    | `auth` / `quota` / `unsupported_param` / `context_overflow` / `bad_request` | 鉴权失效、额度欠费(`insufficient_balance`,与限流区分)、不支持参数、超长、格式错误 | `next_model` | 不重试本模型,直接换链上下一个 |
    | `unknown` | 兜底 | `next_model` | 保守换下一个 |
 
-   - 每模型 `retry_same` 最多 `retry.maxAttemptsPerModel` 次;`endpoint_downgrade` / `schema_downgrade` 在同模型预算内**最多各发生一次**。
+   - **预算口径**:`retry_same`(限流/5xx/网络/超时)每模型最多 `retry.maxAttemptsPerModel` 次。`schema_downgrade` 是**确定性沿降级链推进**(json_schema→json_object→prompt-only,最多 2 次降级重发),**每个等级各发一次直至链尽**,与 `retry_same` 计数**互不占用**;`endpoint_downgrade` 同模型内最多一次。这些确定性降级不计入 `maxAttemptsPerModel`。
    - 整条 failover 受 `retry.totalDeadlineMs` 总超时约束,超时即放弃后续模型(防止超大 `Retry-After` 拖死招聘流程)。
 5. 全链失败 → 抛出聚合错误(含每个模型的 `kind` + 脱敏原因)
 6. **密钥脱敏(Codex)**:写日志、IPC 返回、聚合错误前,统一经 `redact()` 抹去 `apiKey`、`Authorization` 头、请求体与 provider 错误 payload 中的密钥(只保留前后各 4 位掩码)。错误对象不得携带原始 header/body。
@@ -220,7 +220,7 @@ export default {
 
 ### Tab 2「用途分配」
 - 5 个用途各一条**有序 failover 链**:模型 chip 可拖拽排序、删除,[+ 添加模型]
-- 空 = "跟随全局启用顺序"兜底
+- 某用途留空 = 回落 `default` 链;`default` 也空 = 跟随全局启用模型顺序(与 §3.6 三级回落一致)
 
 ### Tab 3「通用」
 - retry 设置:`maxAttemptsPerModel`、`backoffMs`、`maxBackoffMs`、`totalDeadlineMs`
@@ -242,7 +242,7 @@ export default {
 
 各调用点原先写死的 `max_tokens` 改为**消费层代码常量**(每用途一个默认 token 上限,如 resume_screening≈500、rubric_generation≈2000),作为 `chatCompleteForPurpose(..., { maxOutputTokens })` 显式传入;模型卡上的 `sampling.max_tokens`(用户填写)若非空则覆盖该默认。**不**在 schema 里新增 per-purpose token 字段(YAGNI)。
 
-> `greeting_generation` / `message_rewrite` 为**预留用途**:本次无对应调用点,UI 中可配但运行时这两个用途未被消费;待相应功能落地时再接线。未单独配置的用途(含这两者)运行时回落到 `default` 链。
+> `greeting_generation` / `message_rewrite` 为**预留用途**:本次无对应调用点,UI 中可配但运行时这两个用途未被消费;待相应功能落地时再接线。任何用途留空都按 §3.6 三级回落(purpose→default→全局启用顺序)解析。
 
 ## 7. 测试策略
 
@@ -252,7 +252,7 @@ export default {
 - **failover**:mock chatComplete,验证重试次数、`classifyError` 的 `{kind,action}` 映射(限流→retry_same / 额度→next_model / 鉴权→next_model)、`Retry-After` 遵守且被 `maxBackoffMs` 封顶、`totalDeadlineMs` 到点放弃后续模型、jitter 存在、切模型重建请求、全失败聚合(只含脱敏原因)。
 - **endpoint 降级**:openai `endpoint:'auto'`→responses 遇 `endpoint_unavailable` 时,同模型内降级 `openai-chat` 一次;显式锁定 endpoint 时不降级直接换模型。
 - **schema 降级**:请求时 `unsupported_schema` 触发 json_schema→json_object→prompt-only 同模型重发;降到底才换模型(区别于「post-response 校验失败」路径)。
-- **迁移 + 持久化**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试;坏 JSON → 备份+默认;未知字段保留;原子写。
+- **迁移 + 持久化**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试(含补 `endpoint:'auto'`、补全 5 个 purposes、完整 retry 默认,且产物过 v2 校验);坏 JSON → 备份+默认;未知字段保留;**已知字段非法值**(非法 `endpoint`、负 retry、非数字 sampling)→ 该字段回落默认且**不丢整份配置**;原子写。
 - **usage 归一化**:含 reasoning/cached tokens。
 - 测试随 `.mjs` 放在各模块旁(沿用现有 `*.test.mjs` 习惯)。
 
