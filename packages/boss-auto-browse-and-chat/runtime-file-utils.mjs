@@ -298,7 +298,19 @@ function normalizeModel (m) {
   if (typeof out.enabled !== 'boolean') out.enabled = true
   if (!VALID_BRAND.includes(out.brand)) out.brand = 'auto'
   if (!VALID_ENDPOINT.includes(out.endpoint)) out.endpoint = 'auto'
-  out.sampling = { ...defaultSampling(), ...(out.sampling && typeof out.sampling === 'object' ? out.sampling : {}) }
+  // sampling:强制数值化。非数字(如 "0.7" 字符串、垃圾值)→ 能转就转,否则回落 null,
+  // 避免把坏值原样转发给 provider 触发 400 unsupported parameter。
+  const rawSampling = out.sampling && typeof out.sampling === 'object' ? out.sampling : {}
+  const cleanSampling = defaultSampling()
+  for (const [k, v] of Object.entries(rawSampling)) {
+    if (v === null || v === undefined) {
+      cleanSampling[k] = null
+      continue
+    }
+    const n = typeof v === 'number' ? v : Number(v)
+    cleanSampling[k] = Number.isFinite(n) ? n : null
+  }
+  out.sampling = cleanSampling
   const t = out.thinking && typeof out.thinking === 'object' ? out.thinking : {}
   out.thinking = {
     enabled: typeof t.enabled === 'boolean' ? t.enabled : false,

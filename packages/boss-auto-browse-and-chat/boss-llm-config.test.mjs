@@ -44,6 +44,18 @@ test('retry maxAttemptsPerModel=0 preserved (disable retries)', () => {
   assert.equal(v2.retry.maxAttemptsPerModel, 0)
 })
 
+test('sampling values coerced: numeric string → number, garbage → null', () => {
+  const v2 = migrateToV2({
+    version: 2,
+    providers: [{ id: 'p', baseURL: 'u', apiKey: 'k', models: [{ id: 'm', model: 'A', enabled: true, sampling: { temperature: '0.7', top_p: 'abc', max_tokens: 800 } }] }],
+    purposes: {}, retry: {}
+  })
+  const s = v2.providers[0].models[0].sampling
+  assert.equal(s.temperature, 0.7) // "0.7" → 0.7
+  assert.equal(s.top_p, null) // garbage → null
+  assert.equal(s.max_tokens, 800) // number preserved
+})
+
 test('unknown fields preserved', () => {
   const x = { version: 2, providers: [], purposes: {}, retry: {}, _customField: 42 }
   const v2 = migrateToV2(x)
