@@ -29,7 +29,7 @@
 | 配置迁移 | 自动无感迁移 |
 | 品牌识别 | 自动识别 + 可手动覆盖 |
 | 后端架构 | 品牌适配器注册表(方案 A) |
-| 能力粒度 | **按"模型档案(model profile)"解析,品牌只给默认**(Codex review 修正) |
+| 能力粒度 | **两轴解析:provider dialect(看 baseURL/endpoint,决定线格式)× model family(看 model id,决定能力)**,合并成 ModelProfile(Codex review 修正) |
 
 ## 3. 后端架构
 
@@ -37,90 +37,110 @@
 
 ```
 packages/boss-auto-browse-and-chat/llm/
-  brands/
-    generic.mjs       # 默认/兜底:顶层 enable_thinking + thinking_budget(SiliconFlow 等)
-    qwen.mjs          # DashScope/百炼
-    deepseek.mjs      # api.deepseek.com(reasoner 模型名 + V4 thinking.type)
-    glm.mjs           # 智谱 bigmodel
-    openai.mjs        # OpenAI o系/GPT-5
-    volc.mjs          # 火山方舟(单独建档,不与 SiliconFlow 混)
-    index.mjs         # 注册表 + detectBrand({baseURL, modelId})
-  profiles.mjs        # resolveModelProfile(brand, modelId) -> ModelProfile
-  chat-complete.mjs   # chatComplete(model, messages, opts)
-  failover.mjs        # chatCompleteForPurpose(config, purpose, messages, opts)
-  errors.mjs          # 错误分类:isRetryable() / isFatal()
-  usage.mjs           # 归一化 usage(prompt/completion/reasoning/cached tokens)
+  dialects/             # provider dialect:线格式,按 baseURL/endpoint 选
+    generic.mjs         # 默认/兜底:顶层 enable_thinking + thinking_budget(SiliconFlow 等 OpenAI 兼容代理)
+    qwen.mjs            # DashScope/百炼
+    deepseek.mjs        # api.deepseek.com 直连(reasoner 模型名 + V4 thinking.type)
+    glm.mjs             # 智谱 bigmodel
+    openai-chat.mjs     # OpenAI Chat Completions 兼容
+    openai-responses.mjs# OpenAI Responses API(GPT-5/o系优先)
+    volc.mjs            # 火山方舟(单独建档,不与 SiliconFlow 混)
+    index.mjs           # 注册表 + resolveDialect({baseURL, endpointHint})
+  families.mjs          # resolveModelFamily(modelId) -> 能力标志(是否推理模型/JSON 支持/采样限制)
+  profiles.mjs          # resolveModelProfile({dialect, family, userOverrides}) -> ModelProfile
+  chat-complete.mjs     # chatComplete(model, messages, opts)
+  failover.mjs          # chatCompleteForPurpose(config, purpose, messages, opts)
+  errors.mjs            # 错误分类:classifyError() -> {retryable, retryAfterMs}
+  schema-validate.mjs   # 结构化输出:本地 JSON.parse + schema 校验 + 降级
+  usage.mjs             # 归一化 usage(prompt/completion/reasoning/cached tokens)
 ```
 
 不修改 `packages/utils/gpt-request.mjs`(应聘端继续用,零回归)。招聘端各调用点改调用新层。
 
-### 3.2 品牌适配器接口(纯函数,可单测)
+### 3.2 两轴解析:provider dialect × model family(关键修正,Codex #3)
+
+线格式(thinking 字段怎么写、token 上限字段名、结构化输出 builder)由**你实际在对话的那个 API** 决定 = **provider dialect**(看 `baseURL`/endpoint)。模型有没有推理、是否支持 JSON Schema、是否忽略采样参数 = **model family**(看 `model id`)。两者正交:
+
+- **典型坑**:SiliconFlow 托管 `Pro/deepseek-ai/DeepSeek-R1`。dialect = `generic`(SiliconFlow 用顶层 `enable_thinking`),family = `deepseek-reasoner`(能力:推理模型、忽略采样、支持 JSON object)。**绝不能**因为 model id 含 deepseek 就套 api.deepseek.com 的 reasoner 线格式。
+- 直连 `api.deepseek.com` 时:dialect = `deepseek`(reasoner 模型名 / V4 thinking.type),family 同上。
 
 ```js
-// brands/<brand>.mjs
+// dialects/<dialect>.mjs(纯函数,可单测)
 export default {
   id: 'qwen',
   label: '通义千问 Qwen',
-  match({ baseURL, modelId }) { /* 自动识别:域名 + model id 规则 */ return boolean },
-  // 该品牌下的模型档案匹配表(按 model id 正则),从粗到细
-  profiles: [
-    { test: /qwq|-thinking$/i, profile: { /* 见 ModelProfile */ } },
-    { test: /.*/,              profile: { /* 品牌默认档案 */ } }
-  ]
+  match({ baseURL, endpointHint }) { /* 仅看 baseURL/endpoint */ return boolean },
+  buildRequest({ family, thinking, sampling, schema, messages, tokenLimit }) { /* 套本 dialect 线格式 */ },
+  buildStructuredOutput({ schema, family }) { /* dialect 专属:Chat 用 response_format,Responses 用 text.format(Codex #5) */ },
+  parseResponse(raw) { /* 归一化 content/reasoning/usage */ }
 }
 ```
 
-### 3.3 模型档案 ModelProfile(能力下沉到这一层)
+```js
+// families.mjs:resolveModelFamily(modelId) ->
+{
+  isReasoningModel: boolean,           // 由 model id 推断(qwq / -thinking / reasoner / o\d / gpt-5 …)
+  ignoresSampling: ['temperature','top_p','frequency_penalty','presence_penalty'] | [],
+  structuredOutputCap: 'json_schema' | 'json_object' | 'none',  // 该模型最高支持级别
+  effortValues?: ['low','medium','high']  // 仅 reasoning_effort 类;按当前官方文档,不含 none/xhigh(Codex #1)
+}
+```
+
+### 3.3 模型档案 ModelProfile(dialect + family + 用户覆盖 合并结果)
+
+`resolveModelProfile({dialect, family, userOverrides})` 合并出最终档案:
 
 ```js
 {
-  endpoint: 'chat' | 'responses',          // openai GPT-5+ 用 responses,其余 chat
+  dialectId: 'generic' | 'qwen' | 'deepseek' | 'glm' | 'openai-chat' | 'openai-responses' | 'volc',
+  endpoint: 'chat' | 'responses',
   thinkingStyle:
     'top_level_enable' |                   // generic/SiliconFlow: enable_thinking + thinking_budget
     'qwen_enable' |                        // qwen: 顶层 enable_thinking + thinking_budget,thinking 时强制 stream 内部聚合
-    'model_name' |                         // deepseek-reasoner: 由模型名决定
-    'thinking_type' |                      // glm / deepseek-v4: thinking:{type:'enabled'|'disabled'}
-    'reasoning_effort',                    // openai: reasoning_effort / reasoning.effort
-  tokenLimitField: 'max_tokens' | 'max_completion_tokens' | 'max_output_tokens',
-  unsupportedSampling: ['temperature','top_p','frequency_penalty','presence_penalty'] | [],
-  structuredOutput: 'json_schema' | 'json_object' | 'none',
-  requiresStreamForThinking: boolean,
-  effortValues?: ['low','medium','high'],  // reasoning_effort 档位(随模型)
+    'model_name' |                         // deepseek 直连 reasoner: 由模型名决定
+    'thinking_type' |                      // glm / deepseek-v4 直连: thinking:{type:'enabled'|'disabled'}(单选,不与 effort 并存,Codex #2)
+    'reasoning_effort',                    // openai: reasoning_effort(chat) / reasoning.effort(responses)
+  tokenLimitField: 'max_tokens' | 'max_completion_tokens' | 'max_output_tokens',  // 由 dialect/endpoint 定
+  unsupportedSampling: [...],             // = family.ignoresSampling ∪ dialect 限制
+  structuredOutput: 'json_schema' | 'json_object' | 'none',  // = min(dialect 能力, family.structuredOutputCap)
+  requiresStreamForThinking: boolean,     // dialect 定(qwen=true)
+  effortValues?: ['low','medium','high'], // = family.effortValues
 }
 ```
 
-> **关键修正(Codex)**:`temperature`/`top_p`/penalties 的 strip、token 上限字段名、结构化输出级别都因**模型**而异(同品牌不同代不同),所以放在 ModelProfile 而非品牌层。
+> **关键修正(Codex #3)**:thinking 线格式跟 **dialect(API endpoint)**,能力跟 **family(model id)**。两者分开解析再合并,避免「SiliconFlow 托管的 DeepSeek 套错线格式」。
 
-### 3.4 各品牌 / 档案的 thinking 写法(已据 Codex review 核对)
+### 3.4 各 dialect 的 thinking 写法(已据 Codex review 核对)
 
-| 品牌 | thinking 开 | 关键约束 |
+| dialect | thinking 开 | 关键约束 |
 |---|---|---|
-| **generic / SiliconFlow** | 顶层 `enable_thinking:true` + `thinking_budget`(128–32768) | 返回 `reasoning_content` + `reasoning_tokens` |
-| **Qwen / DashScope** | Node openai SDK 用**顶层**字段 `enable_thinking`/`thinking_budget`(`extra_body` 是 Python 写法) | thinking 时**必须 stream**,适配器内部 stream + 聚合;`stream_options.include_usage` 取用量;按快照默认不同,生产固定快照 |
-| **DeepSeek** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type}` / `reasoning_effort` | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
+| **generic / SiliconFlow** | 顶层 `enable_thinking:true` + `thinking_budget`(128–32768) | 返回 `reasoning_content` + `reasoning_tokens`;SiliconFlow 托管的 DeepSeek/Qwen 也走这套(**不**用各家直连写法) |
+| **Qwen / DashScope** | Node openai SDK 用**顶层**字段 `enable_thinking`/`thinking_budget`(`extra_body` 是 Python 写法) | thinking 时**必须 stream**,适配器内部 stream + 聚合;`stream_options.include_usage` 取用量;生产固定快照,不用 `-latest` |
+| **DeepSeek 直连** | 两套:① `deepseek-reasoner`(模型名=开) ② V4 `thinking:{type}` **或** `reasoning_effort` —— **二选一,绝不同时发**(Codex #2) | reasoner 忽略 temperature/top_p/penalties;**支持 JSON 输出**、不支持 function calling;`reasoning_content` 不能回传进输入(否则 400) |
 | **GLM / 智谱** | `thinking:{ type:'enabled'\|'disabled' }`(字符串,非 bool) | GLM-4.5 默认动态思考 |
-| **OpenAI o系/GPT-5** | 新集成优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位随模型(可含 none/minimal/low/medium/high/xhigh) |
+| **OpenAI o系/GPT-5** | 优先 Responses API `reasoning:{effort}` + `max_output_tokens`;Chat 兼容用 `reasoning_effort` + `max_completion_tokens` | 不用 `max_tokens`;限制采样参数;effort 档位 = `low`/`medium`/`high`,`minimal` 仅在当前官方文档列出该模型支持时提供;**不含** `none`/`xhigh`(Codex #1) |
 | **火山方舟 Volc Ark** | 单独建档,按其文档确认字段 | 不与 SiliconFlow 混 |
 
 ### 3.5 chatComplete(单次调用)
 
 `chatComplete(model, messages, { purpose, schema, sampling })`:
-1. `brand = model.brand==='auto' ? detectBrand(model) : 品牌表[model.brand]`
-2. `profile = resolveModelProfile(brand, model.model)`
-3. `buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、按 `structuredOutput` 决定 schema 形态(json_schema→json_object→prompt-only 降级)
+1. `dialect = resolveDialect(model)`(`model.brand!=='auto'` 时按用户锁定的 dialect)
+2. `family = resolveModelFamily(model.model)`;`profile = resolveModelProfile({dialect, family, userOverrides})`
+3. `dialect.buildRequest`:套 thinkingStyle、按 `tokenLimitField` 放 token 上限、strip `unsupportedSampling`、用 **endpoint 专属** structured-output builder(Chat=`response_format`,Responses=`text.format`,Codex #5),按 `structuredOutput` 级别降级(json_schema→json_object→prompt-only)
 4. 若 `requiresStreamForThinking && thinking.enabled`:走 stream,聚合 `reasoning_content`+`content`,末 chunk 取 usage
-5. 调 SDK(带 `AbortController` 超时 + 流空闲超时)
-6. 归一化返回 `{ content, reasoning, usage:{prompt,completion,reasoning,cached,total}, raw }`
+5. 调 SDK(带 `AbortController` 总超时 + 流空闲超时)
+6. **若请求了 schema**:对返回 content 本地 `JSON.parse` + schema 校验(`schema-validate.mjs`);失败则按降级链重试(json_schema→json_object→prompt-only),仍失败则交由 failover 视为该模型失败(Codex #7)
+7. 归一化返回 `{ content, parsed?, reasoning, usage:{prompt,completion,reasoning,cached,total}, raw }`
 
 ### 3.6 failover + retry
 
 `chatCompleteForPurpose(config, purpose, messages, opts)`:
 1. 解析该用途的有序模型链(`purposes[purpose].modelIds`;空→全局启用模型顺序)
-2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs`
-3. **每个目标模型重建请求体**(品牌不同,thinking/token/schema 都不同)
-4. 错误分类(`errors.mjs`):
-   - **重试**:429、5xx、网络重置、流超时
-   - **直接失败换下一个**:鉴权、额度、不支持参数、不支持 schema/tool、超长、请求格式错误
+2. 逐模型尝试;每模型最多 `retry.maxAttemptsPerModel` 次,指数退避 `retry.backoffMs` + **抖动 jitter**(Codex #4)
+3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
+4. 错误分类(`errors.mjs` 的 `classifyError` 看 HTTP status + provider 错误 body/code,返回 `{retryable, retryAfterMs}`,Codex #4):
+   - **重试**:429 **限流**(rate limit)、5xx、网络重置/ECONNRESET、流空闲超时;若响应含 `Retry-After` 头则**遵守**该等待时长
+   - **直接失败换下一个**:鉴权失效、**额度/欠费**(429 中的 quota/insufficient_balance,与限流区分)、不支持参数、不支持 schema/tool、超长、请求格式错误
 5. 全链失败 → 抛出聚合错误(含每个模型的失败原因)
 
 ## 4. 配置 Schema(`boss-llm.json` version 2)
@@ -155,6 +175,12 @@ export default {
 - 更旧 flat `models[]` → 已有 `migrateFlatModelsToProviders` 转 providers,再同上。
 - 旧 `purposeDefaultModelId[p]` → `purposes[p].modelIds = [那个 id]`。
 - 补 `version:2`、`retry` 默认值。
+
+**持久化硬化(Codex #6)**:
+- **严格 JSON**:读用 `JSON.parse`(不用 JSON5),解析失败 → 不静默丢弃,改用 `.bak` 备份原文件后再写默认值。
+- **schema 校验**:读取后校验形状;非法字段记日志但**保留未知字段**(unknown-field preservation,向前兼容更新版本写的配置)。
+- **原子写**:写临时文件 → `fsync` → `rename` 覆盖,避免半截文件。
+- **写前自动备份**:迁移落盘前先把旧文件复制为 `boss-llm.json.bak`,迁移异常可回滚。
 
 ## 5. 配置 UI(三个标签页)
 
@@ -197,10 +223,11 @@ export default {
 
 ## 7. 测试策略
 
-- **品牌适配器/档案**(纯函数):各品牌 `buildRequest` 正确套 thinking、strip 参数、选 token 字段、降级 schema —— 单测。
-- **detectBrand / resolveModelProfile**:典型 baseURL+model id → 正确品牌+档案。
-- **failover**:mock chatComplete,验证重试次数、错误分类(retry vs fatal)、切模型重建请求、全失败聚合。
-- **迁移**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试。
+- **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 `thinking.type` 与 `reasoning_effort` 互斥 —— 单测。
+- **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 仅 low/medium/high(+按模型 minimal)。
+- **schema-validate**:合法 JSON 通过、非法触发降级链(json_schema→json_object→prompt-only)、最终失败上抛。
+- **failover**:mock chatComplete,验证重试次数、`classifyError`(限流 vs 额度 vs 鉴权)、`Retry-After` 遵守、jitter 存在、切模型重建请求、全失败聚合。
+- **迁移 + 持久化**:旧 providers[] / flat models[] / purposeDefaultModelId → 新 schema 快照测试;坏 JSON → 备份+默认;未知字段保留;原子写。
 - **usage 归一化**:含 reasoning/cached tokens。
 - 测试随 `.mjs` 放在各模块旁(沿用现有 `*.test.mjs` 习惯)。
 
