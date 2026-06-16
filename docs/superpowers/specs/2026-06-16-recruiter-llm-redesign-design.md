@@ -192,10 +192,11 @@ export default {
   - 头:[启用开关] [别名] [删除]
   - `Model ID`
   - **品牌行**:`自动识别 → DeepSeek` 徽章 + 下拉(跟随自动 / 锁定某品牌)
-  - **Thinking 控件随识别品牌变形态**:
-    - budget 类(Qwen/generic/GLM):`☑启用` + token 数字框
-    - effort 类(OpenAI):`☑启用` + 低/中/高(随模型档位)
-    - model_name 类(DeepSeek reasoner):提示"由模型名决定"
+  - **Thinking 控件随识别 dialect/profile 变形态**(由 `thinkingStyle` 决定):
+    - budget 类(`top_level_enable`/`qwen_enable`,即 Qwen/generic):`☑启用` + token 预算数字框
+    - toggle 类(`thinking_type`,即 GLM / DeepSeek V4 直连):`☑启用` 开关,**无** token 预算框(该写法只有 `type:enabled|disabled`)
+    - effort 类(`reasoning_effort`,即 OpenAI):`☑启用` + 低/中/高(档位随模型,见 §3.4)
+    - model_name 类(DeepSeek reasoner 直连):只读提示"由模型名决定"
   - **高级参数**(可折叠,留空=自动):temperature / max_tokens / top_p / frequency_penalty / presence_penalty
 - [+ 添加服务商]
 
