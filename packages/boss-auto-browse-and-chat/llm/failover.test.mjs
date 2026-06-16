@@ -47,6 +47,28 @@ test('success on first model', async () => {
   assert.equal(r.parsed.v, 'B') // m2 first
 })
 
+test('passes remaining-budget timeoutMs to chatComplete (bounds single call)', async () => {
+  let seen
+  const fake = async (model, msgs, opts) => {
+    seen = opts.timeoutMs
+    return { content: 'ok', parsed: { ok: true }, usage: {}, raw: {} }
+  }
+  await chatCompleteForPurpose(config, 'resume_screening', [], { _chatComplete: fake })
+  assert.equal(typeof seen, 'number')
+  assert.ok(seen > 0 && seen <= config.retry.totalDeadlineMs)
+})
+
+test('maxAttemptsPerModel=0 disables retry_same → straight to next_model', async () => {
+  const cfg0 = { ...config, retry: { ...config.retry, maxAttemptsPerModel: 0 }, purposes: { resume_screening: { modelIds: ['m1'] }, default: { modelIds: [] } } }
+  let calls = 0
+  const fake = async () => { calls++; throw Object.assign(new Error('rl'), { status: 429 }) }
+  await assert.rejects(
+    chatCompleteForPurpose(cfg0, 'resume_screening', [], { _chatComplete: fake, _sleep: async () => {} }),
+    () => true
+  )
+  assert.equal(calls, 1) // first send only, no retry
+})
+
 test('rate_limit retries same model then succeeds', async () => {
   let n = 0
   const fake = async () => {

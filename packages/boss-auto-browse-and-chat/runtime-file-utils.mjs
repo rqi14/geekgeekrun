@@ -362,7 +362,7 @@ export function migrateToV2 (raw) {
   const r = base.retry && typeof base.retry === 'object' ? base.retry : {}
   const d = defaultRetry()
   base.retry = {
-    maxAttemptsPerModel: Number.isInteger(r.maxAttemptsPerModel) && r.maxAttemptsPerModel >= 1 ? r.maxAttemptsPerModel : d.maxAttemptsPerModel,
+    maxAttemptsPerModel: Number.isInteger(r.maxAttemptsPerModel) && r.maxAttemptsPerModel >= 0 ? r.maxAttemptsPerModel : d.maxAttemptsPerModel,
     backoffMs: typeof r.backoffMs === 'number' && r.backoffMs >= 0 ? r.backoffMs : d.backoffMs,
     maxBackoffMs: typeof r.maxBackoffMs === 'number' && r.maxBackoffMs >= 0 ? r.maxBackoffMs : d.maxBackoffMs,
     totalDeadlineMs: typeof r.totalDeadlineMs === 'number' && r.totalDeadlineMs >= 0 ? r.totalDeadlineMs : d.totalDeadlineMs

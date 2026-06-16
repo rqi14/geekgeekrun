@@ -39,6 +39,11 @@ test('invalid known field value → falls back, config not discarded', () => {
   assert.ok(v2.retry.maxAttemptsPerModel >= 1) // negative → default
 })
 
+test('retry maxAttemptsPerModel=0 preserved (disable retries)', () => {
+  const v2 = migrateToV2({ version: 2, providers: [], purposes: {}, retry: { maxAttemptsPerModel: 0 } })
+  assert.equal(v2.retry.maxAttemptsPerModel, 0)
+})
+
 test('unknown fields preserved', () => {
   const x = { version: 2, providers: [], purposes: {}, retry: {}, _customField: 42 }
   const v2 = migrateToV2(x)

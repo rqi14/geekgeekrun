@@ -84,13 +84,15 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
     // 同模型循环:retry_same / endpoint_downgrade / schema_downgrade
     // 上限保护:总步数不超过 maxAttempts + 几次确定性降级
     for (let guard = 0; guard < (retry.maxAttemptsPerModel + 5); guard++) {
-      if (Date.now() > deadline) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
         failures.push({ id: model.id, kind: 'deadline' })
         return throwAggregate(failures)
       }
       try {
+        // 用剩余预算给单次调用设上限,使 totalDeadlineMs 真正约束整条 failover
         return await chat(working, messages, {
-          schema: opts.schema, sampling: opts.sampling, maxOutputTokens: opts.maxOutputTokens, schemaMode
+          schema: opts.schema, sampling: opts.sampling, maxOutputTokens: opts.maxOutputTokens, schemaMode, timeoutMs: remaining
         })
       } catch (err) {
         const { kind, retryAfterMs } = classifyError(err)
@@ -104,7 +106,9 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
           const base = Number.isFinite(retryAfterMs) ? retryAfterMs : expBackoff
           const backoff = Math.min(base, retry.maxBackoffMs ?? 20000)
           const jitter = backoff * 0.2 * ((retrySameCount % 3) / 3) // 确定性 jitter(不用 Math.random)
-          await sleep(backoff + jitter)
+          // 退避也受总预算约束,避免 sleep 超出 totalDeadlineMs
+          const cappedSleep = Math.min(backoff + jitter, Math.max(0, deadline - Date.now()))
+          await sleep(cappedSleep)
           continue
         }
         if (action === 'endpoint_downgrade') {
