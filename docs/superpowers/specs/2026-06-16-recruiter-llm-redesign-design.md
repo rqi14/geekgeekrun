@@ -52,7 +52,7 @@ packages/boss-auto-browse-and-chat/llm/
   chat-complete.mjs     # chatComplete(model, messages, opts)
   failover.mjs          # chatCompleteForPurpose(config, purpose, messages, opts)
   errors.mjs            # classifyError(err) -> {kind, retryAfterMs?}(**无状态**,只看错误本身);decideNext(kind, state{...,maxAttemptsPerModel}) -> action(契约见 §3.6)
-  schema-validate.mjs   # 结构化输出:本地 JSON.parse + schema 校验 + 降级
+  schema-validate.mjs   # **仅**本地 JSON.parse + schema 校验:通过→返回 parsed,失败→抛 invalid_output。不含降级逻辑(降级由 §3.6 failover 递减 schemaMode 驱动)
   usage.mjs             # 归一化 usage(prompt/completion/reasoning/cached tokens)
 ```
 
@@ -71,8 +71,8 @@ export default {
   id: 'qwen',
   label: '通义千问 Qwen',
   match({ baseURL, endpoint }) { /* 仅看 baseURL / endpoint 锁定 */ return boolean },
-  buildRequest({ family, thinking, sampling, schema, messages, tokenLimit }) { /* 套本 dialect 线格式 */ },
-  buildStructuredOutput({ schema, family }) { /* dialect 专属:Chat 用 response_format,Responses 用 text.format(Codex #5) */ },
+  buildRequest({ family, thinking, sampling, schema, schemaMode, messages, tokenLimit }) { /* 套本 dialect 线格式;按 schemaMode 决定结构化形态,不自循环降级 */ },
+  buildStructuredOutput({ schema, schemaMode, family }) { /* dialect 专属:json_schema→Chat response_format / Responses text.format;json_object→对应 json mode;prompt-only→不带结构化字段、靠 prompt(Codex #5) */ },
   parseResponse(raw) { /* 归一化 content/reasoning/usage */ }
 }
 ```
@@ -141,7 +141,7 @@ export default {
 3. **每个目标模型重建请求体**(dialect 不同,thinking/token/schema 都不同)
 4. **两段式:无状态分类 + 有状态决策**。
    - **`classifyError(err) -> { kind, retryAfterMs? }`**(无状态):只看 HTTP status + provider 错误 body/code,以及本地抛出的校验错误(如 §3.5 步骤 6 输出校验失败)。`kind ∈ { rate_limit, server, network, stream_timeout, endpoint_unavailable, unsupported_schema, invalid_output, auth, quota, unsupported_param, context_overflow, bad_request, unknown }`。**不**读取 endpoint 模式 / 重试计数 / schema 游标。
-   - **`decideNext(kind, state) -> action`**(有状态):`state = { configuredEndpoint, currentEndpoint, schemaMode, retrySameCount, maxAttemptsPerModel }`(`maxAttemptsPerModel` 由 `retry` 策略注入,使 `decideNext` 自洽、可纯函数测试),据此选 `action ∈ { retry_same, endpoint_downgrade, schema_downgrade, next_model, fail }`:
+   - **`decideNext(kind, state) -> action`**(有状态):`state = { configuredEndpoint, currentEndpoint, schemaMode, retrySameCount, maxAttemptsPerModel }`(`maxAttemptsPerModel` 由 `retry` 策略注入,使 `decideNext` 自洽、可纯函数测试),据此选 `action ∈ { retry_same, endpoint_downgrade, schema_downgrade, next_model }`(无单独 `fail`:链上最后一个模型也得到 `next_model` 后,失败由 failover 循环转为「全链失败 → 抛聚合错误」):
 
    | `kind` | 在何 state 下的 `action` |
    |---|---|
@@ -247,7 +247,7 @@ export default {
 
 - **dialect.buildRequest**(纯函数):各 dialect 正确套 thinking、strip 参数、选 token 字段;OpenAI Chat 用 `response_format`、Responses 用 `text.format`;DeepSeek V4 只发 `thinking.type`、绝不发 `reasoning_effort` —— 单测。
 - **resolveDialect / resolveModelFamily / resolveModelProfile**:重点 cover「SiliconFlow 托管 DeepSeek-R1」→ dialect=generic、family=deepseek-reasoner 的组合;OpenAI effort 档位仅取当前官方文档列出的值(`low`/`medium`/`high`,`minimal` 仅在官方文档明确支持该模型时)。
-- **schema-validate**:合法 JSON 通过、非法触发降级链(json_schema→json_object→prompt-only)、最终失败上抛。
+- **schema-validate**:合法 JSON → 返回 parsed;非法 → 抛 `invalid_output`(本模块**不**做降级;降级链在上面的 failover 用例覆盖)。
 - **classifyError(无状态)**:各错误样本 → 正确 `kind`(限流/额度/鉴权/endpoint_unavailable/unsupported_schema/invalid_output…),不依赖任何运行时状态。
 - **decideNext(有状态)**:给定 `{kind, state}` → 正确 `action`(如 `rate_limit` 在 `retrySameCount<上限`→retry_same 否则 next_model;`endpoint_unavailable` 仅 auto+responses→endpoint_downgrade;`unsupported_schema`/`invalid_output` 随 `schemaMode` 游标降级或到底换模型)。
 - **failover**:mock chatComplete,验证每模型 = 首发 + 最多 `maxAttemptsPerModel` 次 `retry_same` 重传(首发不计入该上限)、`Retry-After` 遵守且被 `maxBackoffMs` 封顶、`totalDeadlineMs` 到点放弃后续模型、jitter 存在、切模型重建请求、全失败聚合(只含脱敏原因)。
