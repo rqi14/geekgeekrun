@@ -12,13 +12,25 @@ function minSo (a, b) {
 }
 
 /**
+ * DeepSeek 直连:reasoner(R1)由模型名决定推理(model_name,UI 只读);
+ * V4(deepseek-chat 等非推理)用 thinking:{type}(thinking_type,UI 可开关)。
+ * 其余 dialect 用各自固定 thinkingStyle。
+ */
+function effectiveThinkingStyle (dialect, family) {
+  if (dialect.id === 'deepseek') {
+    return family.isReasoningModel ? 'model_name' : 'thinking_type'
+  }
+  return dialect.thinkingStyle
+}
+
+/**
  * resolveModelProfile({ dialect, family, userOverrides }) -> ModelProfile(spec §3.3)。
  */
 export function resolveModelProfile ({ dialect, family, userOverrides = {} }) {
   return {
     dialectId: dialect.id,
     endpoint: dialect.endpoint,
-    thinkingStyle: dialect.thinkingStyle,
+    thinkingStyle: effectiveThinkingStyle(dialect, family),
     tokenLimitField: dialect.tokenLimitField,
     unsupportedSampling: [...(family.ignoresSampling || [])],
     structuredOutput: minSo(dialectStructuredCap(dialect), family.structuredOutputCap),

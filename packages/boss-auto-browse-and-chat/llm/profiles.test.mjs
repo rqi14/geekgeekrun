@@ -25,6 +25,15 @@ test('structuredOutput = min(dialect cap, family cap): deepseek family caps json
   assert.equal(p2.structuredOutput, 'json_object')
 })
 
+test('deepseek direct: reasoner → model_name, V4 chat → thinking_type (UI toggle)', () => {
+  const reasoner = profileFor('https://api.deepseek.com/v1', 'deepseek-reasoner')
+  assert.equal(reasoner.dialectId, 'deepseek')
+  assert.equal(reasoner.thinkingStyle, 'model_name')
+  const v4 = profileFor('https://api.deepseek.com/v1', 'deepseek-chat')
+  assert.equal(v4.dialectId, 'deepseek')
+  assert.equal(v4.thinkingStyle, 'thinking_type')
+})
+
 test('openai gpt-5 auto → responses endpoint + effortValues', () => {
   const p = profileFor('https://api.openai.com/v1', 'gpt-5')
   assert.equal(p.dialectId, 'openai-responses')

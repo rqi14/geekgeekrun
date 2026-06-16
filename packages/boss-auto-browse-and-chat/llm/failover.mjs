@@ -100,7 +100,8 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
         })
         if (action === 'retry_same') {
           retrySameCount++
-          const base = retryAfterMs ?? retry.backoffMs * Math.pow(2, retrySameCount - 1)
+          const expBackoff = retry.backoffMs * Math.pow(2, retrySameCount - 1)
+          const base = Number.isFinite(retryAfterMs) ? retryAfterMs : expBackoff
           const backoff = Math.min(base, retry.maxBackoffMs ?? 20000)
           const jitter = backoff * 0.2 * ((retrySameCount % 3) / 3) // 确定性 jitter(不用 Math.random)
           await sleep(backoff + jitter)

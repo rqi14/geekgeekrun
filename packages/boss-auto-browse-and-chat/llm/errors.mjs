@@ -21,6 +21,19 @@ function bodyText (err) {
 }
 
 /**
+ * 解析 Retry-After:支持「秒数」与 HTTP-date 两种形式;无法解析返回 undefined
+ * (避免 NaN 让退避失效)。
+ */
+function parseRetryAfterMs (ra) {
+  if (ra === undefined || ra === null) return undefined
+  const secs = Number(ra)
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+  const ts = Date.parse(String(ra))
+  if (!Number.isNaN(ts)) return Math.max(0, ts - Date.now())
+  return undefined
+}
+
+/**
  * classifyError(err) -> { kind, retryAfterMs? }。只看错误本身。
  */
 export function classifyError (err) {
@@ -34,8 +47,7 @@ export function classifyError (err) {
     return { kind: 'network' }
   }
   if (status === 429) {
-    const ra = readHeader(err?.headers, 'retry-after')
-    const retryAfterMs = ra ? Number(ra) * 1000 : undefined
+    const retryAfterMs = parseRetryAfterMs(readHeader(err?.headers, 'retry-after'))
     if (/insufficient|quota|balance|exceeded your current quota/.test(text)) return { kind: 'quota', retryAfterMs }
     return { kind: 'rate_limit', retryAfterMs }
   }

@@ -9,6 +9,19 @@ test('classifyError: 429 → rate_limit, honors Retry-After', () => {
   assert.equal(c.retryAfterMs, 3000)
 })
 
+test('classifyError: 429 with HTTP-date Retry-After → finite ms, never NaN', () => {
+  const future = new Date(Date.now() + 5000).toUTCString()
+  const c = classifyError(Object.assign(new Error('rate'), { status: 429, headers: { 'retry-after': future } }))
+  assert.equal(c.kind, 'rate_limit')
+  assert.equal(Number.isFinite(c.retryAfterMs), true)
+  assert.ok(c.retryAfterMs >= 0)
+})
+
+test('classifyError: 429 with unparseable Retry-After → undefined (not NaN)', () => {
+  const c = classifyError(Object.assign(new Error('rate'), { status: 429, headers: { 'retry-after': 'garbage' } }))
+  assert.equal(c.retryAfterMs, undefined)
+})
+
 test('classifyError: 401 → auth', () => {
   assert.equal(classifyError(Object.assign(new Error(), { status: 401 })).kind, 'auth')
 })
