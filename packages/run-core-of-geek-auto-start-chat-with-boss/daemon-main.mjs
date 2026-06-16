@@ -1,6 +1,8 @@
+import '@geekgeekrun/utils/process-text-encoding-register.mjs'
 import path from 'node:path'
 import * as url from 'url'
 import { sleep } from '@geekgeekrun/utils/sleep.mjs';
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 import childProcess from 'node:child_process';
 import { AUTO_CHAT_ERROR_EXIT_CODE } from './enums.mjs'
 
@@ -22,10 +24,10 @@ function runWithDaemon () {
     )],
     {
       stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'ipc'],
-      env: {
+      env: buildUtf8ProcessEnv({
         ...process.env,
         MAIN_BOSSGEEKGO_RERUN_INTERVAL: rerunInterval
-      }
+      })
     }
   )
 

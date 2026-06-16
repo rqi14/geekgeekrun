@@ -5,6 +5,7 @@ import * as childProcess from 'node:child_process'
 import * as JSONStream from 'JSONStream'
 import { getLastUsedAndAvailableBrowser } from '../flow/DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import { configWithBrowserAssistant } from '../features/config-with-browser-assistant'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 
 export let cookieAssistantWindow: BrowserWindow | null = null
 export function createCookieAssistantWindow(
@@ -80,10 +81,10 @@ export function createCookieAssistantWindow(
       })
       return
     }
-    const subProcessEnv = {
+    const subProcessEnv = buildUtf8ProcessEnv({
       ...process.env,
       PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath
-    }
+    })
     subProcessOfBossZhipinLoginPageWithPreloadExtension = childProcess.spawn(
       process.argv[0],
       process.env.NODE_ENV === 'development'

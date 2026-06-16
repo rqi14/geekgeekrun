@@ -48,6 +48,7 @@ import { checkUpdateForUi } from '../../../features/updater'
 import gtag from '../../../utils/gtag'
 import { daemonEE, sendToDaemon } from '../connect-to-daemon'
 import { runCommon } from '../../../features/run-common'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 import { loginWithCookieAssistant } from '../../../features/login-with-cookie-assistant'
 import { configWithBrowserAssistant } from '../../../features/config-with-browser-assistant'
 import {
@@ -58,6 +59,110 @@ import {
 import { getLastUsedAndAvailableBrowser } from '../../DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import { waitForCommonJobConditionDone } from '../../../features/common-job-condition'
 import { ensureConfigFileExist } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+
+const forwardedWorkerExitHandlers = new Map<string, (message: any) => void>()
+const STOP_WORKER_TIMEOUT_MS = 15000
+
+function forwardWorkerExitOnce(workerId: string) {
+  if (forwardedWorkerExitHandlers.has(workerId)) {
+    return
+  }
+
+  const handler = (message: any) => {
+    if (message.workerId !== workerId || message.type !== 'worker-exited') {
+      return
+    }
+    mainWindow?.webContents.send('worker-exited', message)
+    if (!message.restarting) {
+      daemonEE.off('message', handler)
+      forwardedWorkerExitHandlers.delete(workerId)
+    }
+  }
+
+  forwardedWorkerExitHandlers.set(workerId, handler)
+  daemonEE.on('message', handler)
+}
+
+function waitForWorkerStopped(workerId: string) {
+  let cancel: (() => void) | null = null
+  const promise = new Promise<void>((resolve, reject) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+    let handler: (message: any) => void
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      daemonEE.off('message', handler)
+      clearTimeout(timer)
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    }
+    cancel = () => finish()
+    handler = (message: any) => {
+      if (message.workerId !== workerId) {
+        return
+      }
+      if (message.type === 'worker-exited' || message.type === 'worker-disconnected') {
+        finish()
+      }
+    }
+    timer = setTimeout(async () => {
+      try {
+        const status = await (sendToDaemon as any)(
+          { type: 'get-status' },
+          { needCallback: true, timeout: 3000 }
+        )
+        const stillRunning = status?.workers?.some((worker: any) => worker.workerId === workerId)
+        if (!stillRunning) {
+          finish()
+          return
+        }
+      } catch {
+        // Fall through to timeout error.
+      }
+      finish(new Error(`等待 ${workerId} 停止超时`))
+    }, STOP_WORKER_TIMEOUT_MS)
+
+    daemonEE.on('message', handler)
+  })
+  return {
+    promise,
+    cancel: () => cancel?.()
+  }
+}
+
+async function stopWorkerWithTimeout({
+  workerId,
+  stoppingChannel,
+  stoppedChannel
+}: {
+  workerId: string
+  stoppingChannel: string
+  stoppedChannel: string
+}) {
+  mainWindow?.webContents.send(stoppingChannel)
+  const stopped = waitForWorkerStopped(workerId)
+  try {
+    await (sendToDaemon as any)(
+      {
+        type: 'stop-worker',
+        workerId
+      },
+      {
+        needCallback: true,
+        timeout: 5000
+      }
+    )
+    await stopped.promise
+  } catch (error) {
+    stopped.cancel()
+    throw error
+  }
+  mainWindow?.webContents.send(stoppedChannel)
+}
 
 export default function initIpc() {
   ipcMain.handle('save-config-file-from-ui', async (ev, payload) => {
@@ -355,10 +460,10 @@ export default function initIpc() {
         })
         return
       }
-      const subProcessEnv = {
+      const subProcessEnv = buildUtf8ProcessEnv({
         ...process.env,
         PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable!.executablePath
-      }
+      })
       subProcessOfOpenBossSite = childProcess.spawn(
         process.argv[0],
         process.env.NODE_ENV === 'development'
@@ -714,81 +819,31 @@ export default function initIpc() {
   ipcMain.handle('run-boss-recommend', async () => {
     const mode = 'bossRecommendMain'
     const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-recommend', async () => {
-    mainWindow?.webContents.send('boss-recommend-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossRecommendMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossRecommendMain',
+      stoppingChannel: 'boss-recommend-stopping',
+      stoppedChannel: 'boss-recommend-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossRecommendMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-recommend-stopped')
   })
 
   ipcMain.handle('run-boss-chat-page', async () => {
     const mode = 'bossChatPageMain'
     const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-chat-page', async () => {
-    mainWindow?.webContents.send('boss-chat-page-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossChatPageMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossChatPageMain',
+      stoppingChannel: 'boss-chat-page-stopping',
+      stoppedChannel: 'boss-chat-page-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossChatPageMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-chat-page-stopped')
   })
 
   // ── 招聘端调试工具 ──────────────────────────────────────────────────────────
@@ -832,7 +887,11 @@ export default function initIpc() {
         ? [process.argv[1], '--mode=bossChatDebugMain']
         : ['--mode=bossChatDebugMain'],
       {
-        env: { ...process.env, PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath, GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME },
+        env: buildUtf8ProcessEnv({
+          ...process.env,
+          PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath,
+          GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME
+        }),
         stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe']
       }
     )
@@ -906,41 +965,16 @@ export default function initIpc() {
   ipcMain.handle('run-boss-auto-browse-and-chat', async () => {
     const mode = 'bossAutoBrowseAndChatMain'
     const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-auto-browse-and-chat', async () => {
-    mainWindow?.webContents.send('boss-auto-browse-and-chat-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossAutoBrowseAndChatMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossAutoBrowseAndChatMain',
+      stoppingChannel: 'boss-auto-browse-and-chat-stopping',
+      stoppedChannel: 'boss-auto-browse-and-chat-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossAutoBrowseAndChatMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-auto-browse-and-chat-stopped')
   })
 
   ipcMain.handle('check-boss-recruiter-cookie-file', async () => {
