@@ -473,6 +473,42 @@ export default function initIpc() {
       return { ok: false, error: msg }
     }
   })
+  ipcMain.handle('boss-detect-brand', async (_, payload: {
+    baseURL: string
+    model: string
+    endpoint?: string
+  }) => {
+    try {
+      const { resolveModelFamily } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/families.mjs'
+      )
+      const { resolveDialect } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/dialects/index.mjs'
+      )
+      const family = resolveModelFamily(payload.model)
+      const dialect = resolveDialect({
+        baseURL: payload.baseURL,
+        brandLock: 'auto',
+        endpoint: payload.endpoint ?? 'auto',
+        family
+      })
+      return {
+        dialectId: dialect.id,
+        label: dialect.label,
+        isReasoningModel: family.isReasoningModel,
+        effortValues: family.effortValues ?? null,
+        thinkingStyle: dialect.thinkingStyle
+      }
+    } catch {
+      return {
+        dialectId: 'generic',
+        label: '通用兼容',
+        isReasoningModel: false,
+        effortValues: null,
+        thinkingStyle: 'top_level_enable'
+      }
+    }
+  })
   // ── end 招聘端 LLM 配置窗口 ──────────────────────────────────────────────────
 
   ipcMain.handle('resume-edit', async () => {
