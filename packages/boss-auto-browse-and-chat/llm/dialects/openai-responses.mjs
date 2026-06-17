@@ -39,7 +39,8 @@ export default {
     const req = { model, input: messages }
     if (typeof tokenLimit === 'number') req.max_output_tokens = tokenLimit
     applySampling(req, sampling, family.ignoresSampling)
-    if (thinking?.enabled && thinking.effort) req.reasoning = { effort: thinking.effort }
+    // reasoning 仅对推理模型有效;非推理模型不应发送
+    if (thinking?.enabled && thinking.effort && family.isReasoningModel) req.reasoning = { effort: thinking.effort }
     const t = buildTextFormat(schema, schemaMode)
     if (t) req.text = t
     return req

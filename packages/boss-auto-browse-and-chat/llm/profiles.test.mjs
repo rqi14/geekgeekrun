@@ -34,6 +34,12 @@ test('deepseek direct: reasoner → model_name, V4 chat → thinking_type (UI to
   assert.equal(v4.thinkingStyle, 'thinking_type')
 })
 
+test('openai non-reasoning (gpt-4o) → thinkingStyle none (UI hides control)', () => {
+  const p = profileFor('https://api.openai.com/v1', 'gpt-4o')
+  assert.equal(p.dialectId, 'openai-chat')
+  assert.equal(p.thinkingStyle, 'none')
+})
+
 test('openai gpt-5 auto → responses endpoint + effortValues', () => {
   const p = profileFor('https://api.openai.com/v1', 'gpt-5')
   assert.equal(p.dialectId, 'openai-responses')

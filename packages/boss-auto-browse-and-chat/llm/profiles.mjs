@@ -20,6 +20,10 @@ function effectiveThinkingStyle (dialect, family) {
   if (dialect.id === 'deepseek') {
     return family.isReasoningModel ? 'model_name' : 'thinking_type'
   }
+  // OpenAI 非推理模型(gpt-4o/4.1)无 reasoning_effort 能力 → 'none'(UI 不显示思考控件)
+  if ((dialect.id === 'openai-chat' || dialect.id === 'openai-responses') && !family.isReasoningModel) {
+    return 'none'
+  }
   return dialect.thinkingStyle
 }
 

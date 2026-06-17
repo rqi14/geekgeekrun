@@ -130,8 +130,11 @@
                       </el-radio-button>
                     </el-radio-group>
                   </template>
-                  <template v-else>
+                  <template v-else-if="thinkingKind(m) === 'model_name'">
                     <span class="form-tip">由模型名决定（如 deepseek-reasoner）</span>
+                  </template>
+                  <template v-else>
+                    <span class="form-tip">该模型无思考能力</span>
                   </template>
                 </div>
 
@@ -501,11 +504,12 @@ function isOpenAi(m: ModelEntry): boolean {
 }
 // thinkingStyle 由后端 detect-brand 按「品牌锁定 + 模型名」综合给出（含 DeepSeek
 // reasoner→model_name / V4→thinking_type 的区分），故直接采用 detected 结果。
-function thinkingKind(m: ModelEntry): 'budget' | 'toggle' | 'effort' | 'model_name' {
+function thinkingKind(m: ModelEntry): 'budget' | 'toggle' | 'effort' | 'model_name' | 'none' {
   const style = detected[m.id]?.thinkingStyle
   if (style === 'reasoning_effort') return 'effort'
   if (style === 'thinking_type') return 'toggle'
   if (style === 'model_name') return 'model_name'
+  if (style === 'none') return 'none'
   return 'budget'
 }
 function effortValues(m: ModelEntry): string[] {

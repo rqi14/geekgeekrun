@@ -65,6 +65,12 @@ test('openai-chat: reasoning_effort + max_completion_tokens, no max_tokens, stri
   assert.equal('temperature' in req, false)
 })
 
+test('openai-chat non-reasoning (gpt-4o): never sends reasoning_effort even if thinking on', () => {
+  const f = resolveModelFamily('gpt-4o')
+  const req = openaiChat.buildRequest({ family: f, thinking: { enabled: true, effort: 'high' }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 600, model: 'gpt-4o' })
+  assert.equal('reasoning_effort' in req, false)
+})
+
 test('openai-responses: reasoning.effort + max_output_tokens + text.format', () => {
   const f = resolveModelFamily('gpt-5')
   const schema = { name: 'r', schema: { type: 'object' } }
