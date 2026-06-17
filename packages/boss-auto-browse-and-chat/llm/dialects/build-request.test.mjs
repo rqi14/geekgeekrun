@@ -80,6 +80,20 @@ test('openai-responses: reasoning.effort + max_output_tokens + text.format', () 
   assert.ok(req.text && req.text.format)
 })
 
+test('openai-responses: forwards temperature/top_p, strips chat-only penalties', () => {
+  const f = resolveModelFamily('gpt-4o') // non-reasoning → ignoresSampling empty
+  const req = openaiResponses.buildRequest({
+    family: f,
+    thinking: { enabled: false },
+    sampling: { temperature: 0.5, top_p: 0.9, frequency_penalty: 0.3, presence_penalty: 0.2 },
+    schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 600, model: 'gpt-4o'
+  })
+  assert.equal(req.temperature, 0.5)
+  assert.equal(req.top_p, 0.9)
+  assert.equal('frequency_penalty' in req, false)
+  assert.equal('presence_penalty' in req, false)
+})
+
 test('schemaMode downgrade: json_object then prompt-only (generic)', () => {
   const f = resolveModelFamily('qwen-plus')
   const j = generic.buildRequest({ family: f, thinking: { enabled: false }, sampling: {}, schema: { name: 'x', schema: {} }, schemaMode: 'json_object', messages: msgs, tokenLimit: 500, model: 'qwen-plus' })
