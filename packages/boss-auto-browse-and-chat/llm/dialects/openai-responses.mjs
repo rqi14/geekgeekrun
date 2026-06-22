@@ -5,10 +5,15 @@
  * chat-complete.mjs 走 openai.responses.create(见 chat-complete.mjs)。
  */
 
+// Responses API 仅接受 temperature / top_p;frequency_penalty / presence_penalty 是
+// Chat Completions 专有,发给 responses.create 会被拒为 unknown parameter。
+const RESPONSES_SAMPLING = ['temperature', 'top_p']
+
 function applySampling (req, sampling, ignore) {
   for (const [k, v] of Object.entries(sampling || {})) {
     if (v === null || v === undefined) continue
     if (ignore.includes(k)) continue
+    if (!RESPONSES_SAMPLING.includes(k)) continue
     req[k] = v
   }
 }
@@ -39,7 +44,8 @@ export default {
     const req = { model, input: messages }
     if (typeof tokenLimit === 'number') req.max_output_tokens = tokenLimit
     applySampling(req, sampling, family.ignoresSampling)
-    if (thinking?.enabled && thinking.effort) req.reasoning = { effort: thinking.effort }
+    // reasoning 仅对推理模型有效;非推理模型不应发送
+    if (thinking?.enabled && thinking.effort && family.isReasoningModel) req.reasoning = { effort: thinking.effort }
     const t = buildTextFormat(schema, schemaMode)
     if (t) req.text = t
     return req

@@ -82,15 +82,20 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
     let working = { ...model, endpoint: currentEndpoint }
 
     // 同模型循环:retry_same / endpoint_downgrade / schema_downgrade
-    // 上限保护:总步数不超过 maxAttempts + 几次确定性降级
-    for (let guard = 0; guard < (retry.maxAttemptsPerModel + 5); guard++) {
-      if (Date.now() > deadline) {
+    // 上限 = retry_same 次数 + 确定性降级步数(schema 链各级 + 1 次 endpoint 降级)+ 首发,
+    // 由实际步数推出,不用魔数。
+    const guardMax = retry.maxAttemptsPerModel + SCHEMA_CHAIN.length + 2
+    let advanced = false
+    for (let guard = 0; guard < guardMax; guard++) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
         failures.push({ id: model.id, kind: 'deadline' })
         return throwAggregate(failures)
       }
       try {
+        // 用剩余预算给单次调用设上限,使 totalDeadlineMs 真正约束整条 failover
         return await chat(working, messages, {
-          schema: opts.schema, sampling: opts.sampling, maxOutputTokens: opts.maxOutputTokens, schemaMode
+          schema: opts.schema, sampling: opts.sampling, maxOutputTokens: opts.maxOutputTokens, schemaMode, timeoutMs: remaining
         })
       } catch (err) {
         const { kind, retryAfterMs } = classifyError(err)
@@ -100,10 +105,13 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
         })
         if (action === 'retry_same') {
           retrySameCount++
-          const base = retryAfterMs ?? retry.backoffMs * Math.pow(2, retrySameCount - 1)
+          const expBackoff = retry.backoffMs * Math.pow(2, retrySameCount - 1)
+          const base = Number.isFinite(retryAfterMs) ? retryAfterMs : expBackoff
           const backoff = Math.min(base, retry.maxBackoffMs ?? 20000)
           const jitter = backoff * 0.2 * ((retrySameCount % 3) / 3) // 确定性 jitter(不用 Math.random)
-          await sleep(backoff + jitter)
+          // 退避也受总预算约束,避免 sleep 超出 totalDeadlineMs
+          const cappedSleep = Math.min(backoff + jitter, Math.max(0, deadline - Date.now()))
+          await sleep(cappedSleep)
           continue
         }
         if (action === 'endpoint_downgrade') {
@@ -118,9 +126,12 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
         }
         // next_model
         failures.push({ id: model.id, kind, reason: redact(err.message, model) })
+        advanced = true
         break
       }
     }
+    // guard 用尽仍未 return/换模型 → 记录,避免聚合错误漏掉该模型
+    if (!advanced) failures.push({ id: model.id, kind: 'exhausted' })
   }
   return throwAggregate(failures)
 }

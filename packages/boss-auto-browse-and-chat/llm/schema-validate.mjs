@@ -20,9 +20,13 @@ export function validateAgainstSchema (content, schema) {
     throw new LlmError('invalid_output', 'response is not valid JSON')
   }
   const required = schema?.schema?.required
-  if (Array.isArray(required)) {
+  if (Array.isArray(required) && required.length > 0) {
+    // 非对象 JSON(如 false / "no" / 42)无法满足 required,且 `in` 会对非对象抛 TypeError
+    if (parsed === null || typeof parsed !== 'object') {
+      throw new LlmError('invalid_output', 'response JSON is not an object')
+    }
     for (const key of required) {
-      if (!(key in (parsed ?? {}))) {
+      if (!(key in parsed)) {
         throw new LlmError('invalid_output', `missing required key: ${key}`)
       }
     }

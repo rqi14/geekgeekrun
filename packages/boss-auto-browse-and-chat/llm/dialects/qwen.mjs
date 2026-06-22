@@ -35,6 +35,9 @@ export default {
       if (typeof thinking.budget === 'number') req.thinking_budget = thinking.budget
       req.stream = true
       req.stream_options = { include_usage: true }
+    } else {
+      // Qwen3 等默认开启思考,必须显式 false 才能关闭(省略会沿用默认思考态)
+      req.enable_thinking = false
     }
     if (schemaMode === 'json_schema') req.response_format = { type: 'json_schema', json_schema: schema }
     else if (schemaMode === 'json_object') req.response_format = { type: 'json_object' }

@@ -30,7 +30,8 @@ export default {
     const req = { model, messages }
     if (typeof tokenLimit === 'number') req.max_completion_tokens = tokenLimit
     applySampling(req, sampling, family.ignoresSampling)
-    if (thinking?.enabled && thinking.effort) req.reasoning_effort = thinking.effort
+    // reasoning_effort 仅对推理模型有效;发给 gpt-4o 等非推理模型会被 OpenAI 拒为 unsupported parameter
+    if (thinking?.enabled && thinking.effort && family.isReasoningModel) req.reasoning_effort = thinking.effort
     if (schemaMode === 'json_schema') req.response_format = { type: 'json_schema', json_schema: schema }
     else if (schemaMode === 'json_object') req.response_format = { type: 'json_object' }
     return req

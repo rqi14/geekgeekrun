@@ -21,6 +21,19 @@ function bodyText (err) {
 }
 
 /**
+ * 解析 Retry-After:支持「秒数」与 HTTP-date 两种形式;无法解析返回 undefined
+ * (避免 NaN 让退避失效)。
+ */
+function parseRetryAfterMs (ra) {
+  if (ra === undefined || ra === null) return undefined
+  const secs = Number(ra)
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+  const ts = Date.parse(String(ra))
+  if (!Number.isNaN(ts)) return Math.max(0, ts - Date.now())
+  return undefined
+}
+
+/**
  * classifyError(err) -> { kind, retryAfterMs? }。只看错误本身。
  */
 export function classifyError (err) {
@@ -34,15 +47,16 @@ export function classifyError (err) {
     return { kind: 'network' }
   }
   if (status === 429) {
-    const ra = readHeader(err?.headers, 'retry-after')
-    const retryAfterMs = ra ? Number(ra) * 1000 : undefined
+    const retryAfterMs = parseRetryAfterMs(readHeader(err?.headers, 'retry-after'))
     if (/insufficient|quota|balance|exceeded your current quota/.test(text)) return { kind: 'quota', retryAfterMs }
     return { kind: 'rate_limit', retryAfterMs }
   }
   if (status === 401 || status === 403) return { kind: 'auth' }
   if (status === 404) return { kind: 'endpoint_unavailable' }
   if (status === 400) {
-    if (/response_format|json_schema|text\.format|schema|tool|function/.test(text)) return { kind: 'unsupported_schema' }
+    // 含 must-contain-json:provider 拒绝 json_object 模式(prompt 未含 "json")→ 视为结构化输出问题,
+    // 触发 schema_downgrade 走到 prompt-only,而非误判 bad_request 直接换模型。
+    if (/response_format|json_schema|text\.format|json[_\s-]?object|must contain the word|schema|tool|function/.test(text)) return { kind: 'unsupported_schema' }
     if (/maximum context|context length|too long|reduce the length/.test(text)) return { kind: 'context_overflow' }
     if (/temperature|top_p|unsupported parameter|unknown parameter|reasoning_effort/.test(text)) return { kind: 'unsupported_param' }
     return { kind: 'bad_request' }

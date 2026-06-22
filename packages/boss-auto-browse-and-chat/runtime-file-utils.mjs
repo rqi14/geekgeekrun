@@ -282,6 +282,7 @@ const bossLlmConfigFileName = 'boss-llm.json'
 const PURPOSE_KEYS = ['resume_screening', 'rubric_generation', 'greeting_generation', 'message_rewrite', 'default']
 const VALID_ENDPOINT = ['auto', 'chat', 'responses']
 const VALID_BRAND = ['auto', 'qwen', 'deepseek', 'glm', 'openai', 'generic']
+const VALID_EFFORT = ['minimal', 'low', 'medium', 'high']
 
 function defaultRetry () {
   return { maxAttemptsPerModel: 2, backoffMs: 500, maxBackoffMs: 20000, totalDeadlineMs: 120000 }
@@ -298,12 +299,26 @@ function normalizeModel (m) {
   if (typeof out.enabled !== 'boolean') out.enabled = true
   if (!VALID_BRAND.includes(out.brand)) out.brand = 'auto'
   if (!VALID_ENDPOINT.includes(out.endpoint)) out.endpoint = 'auto'
-  out.sampling = { ...defaultSampling(), ...(out.sampling && typeof out.sampling === 'object' ? out.sampling : {}) }
+  // sampling:强制数值化。非数字(如 "0.7" 字符串、垃圾值)→ 能转就转,否则回落 null,
+  // 避免把坏值原样转发给 provider 触发 400 unsupported parameter。
+  const rawSampling = out.sampling && typeof out.sampling === 'object' ? out.sampling : {}
+  const cleanSampling = defaultSampling()
+  for (const [k, v] of Object.entries(rawSampling)) {
+    if (v === null || v === undefined) {
+      cleanSampling[k] = null
+      continue
+    }
+    const n = typeof v === 'number' ? v : Number(v)
+    cleanSampling[k] = Number.isFinite(n) ? n : null
+  }
+  out.sampling = cleanSampling
   const t = out.thinking && typeof out.thinking === 'object' ? out.thinking : {}
+  // thinking 同样按已知字段非法回落:budget 限 128–32768,effort 限已知档位
+  const validBudget = typeof t.budget === 'number' && t.budget >= 128 && t.budget <= 32768
   out.thinking = {
     enabled: typeof t.enabled === 'boolean' ? t.enabled : false,
-    budget: typeof t.budget === 'number' ? t.budget : 2048,
-    effort: typeof t.effort === 'string' ? t.effort : 'medium'
+    budget: validBudget ? t.budget : 2048,
+    effort: VALID_EFFORT.includes(t.effort) ? t.effort : 'medium'
   }
   return out
 }
@@ -362,7 +377,7 @@ export function migrateToV2 (raw) {
   const r = base.retry && typeof base.retry === 'object' ? base.retry : {}
   const d = defaultRetry()
   base.retry = {
-    maxAttemptsPerModel: Number.isInteger(r.maxAttemptsPerModel) && r.maxAttemptsPerModel >= 1 ? r.maxAttemptsPerModel : d.maxAttemptsPerModel,
+    maxAttemptsPerModel: Number.isInteger(r.maxAttemptsPerModel) && r.maxAttemptsPerModel >= 0 ? r.maxAttemptsPerModel : d.maxAttemptsPerModel,
     backoffMs: typeof r.backoffMs === 'number' && r.backoffMs >= 0 ? r.backoffMs : d.backoffMs,
     maxBackoffMs: typeof r.maxBackoffMs === 'number' && r.maxBackoffMs >= 0 ? r.maxBackoffMs : d.maxBackoffMs,
     totalDeadlineMs: typeof r.totalDeadlineMs === 'number' && r.totalDeadlineMs >= 0 ? r.totalDeadlineMs : d.totalDeadlineMs

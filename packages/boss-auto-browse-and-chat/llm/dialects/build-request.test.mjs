@@ -27,6 +27,13 @@ test('qwen: top-level enable_thinking (not extra_body), stream when thinking', (
   assert.ok(req.stream_options && req.stream_options.include_usage === true)
 })
 
+test('qwen: thinking off → explicit enable_thinking:false, no stream', () => {
+  const f = resolveModelFamily('qwen-plus')
+  const req = qwen.buildRequest({ family: f, thinking: { enabled: false }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 500, model: 'qwen-plus' })
+  assert.equal(req.enable_thinking, false)
+  assert.equal('stream' in req, false)
+})
+
 test('deepseek V4: thinking.type only, never reasoning_effort', () => {
   const f = resolveModelFamily('deepseek-chat')
   const req = deepseek.buildRequest({ family: f, thinking: { enabled: true }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 500, model: 'deepseek-chat' })
@@ -58,6 +65,12 @@ test('openai-chat: reasoning_effort + max_completion_tokens, no max_tokens, stri
   assert.equal('temperature' in req, false)
 })
 
+test('openai-chat non-reasoning (gpt-4o): never sends reasoning_effort even if thinking on', () => {
+  const f = resolveModelFamily('gpt-4o')
+  const req = openaiChat.buildRequest({ family: f, thinking: { enabled: true, effort: 'high' }, sampling: {}, schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 600, model: 'gpt-4o' })
+  assert.equal('reasoning_effort' in req, false)
+})
+
 test('openai-responses: reasoning.effort + max_output_tokens + text.format', () => {
   const f = resolveModelFamily('gpt-5')
   const schema = { name: 'r', schema: { type: 'object' } }
@@ -65,6 +78,20 @@ test('openai-responses: reasoning.effort + max_output_tokens + text.format', () 
   assert.equal(req.reasoning.effort, 'high')
   assert.equal(req.max_output_tokens, 700)
   assert.ok(req.text && req.text.format)
+})
+
+test('openai-responses: forwards temperature/top_p, strips chat-only penalties', () => {
+  const f = resolveModelFamily('gpt-4o') // non-reasoning → ignoresSampling empty
+  const req = openaiResponses.buildRequest({
+    family: f,
+    thinking: { enabled: false },
+    sampling: { temperature: 0.5, top_p: 0.9, frequency_penalty: 0.3, presence_penalty: 0.2 },
+    schema: null, schemaMode: 'none', messages: msgs, tokenLimit: 600, model: 'gpt-4o'
+  })
+  assert.equal(req.temperature, 0.5)
+  assert.equal(req.top_p, 0.9)
+  assert.equal('frequency_penalty' in req, false)
+  assert.equal('presence_penalty' in req, false)
 })
 
 test('schemaMode downgrade: json_object then prompt-only (generic)', () => {

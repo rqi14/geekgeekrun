@@ -9,6 +9,19 @@ test('classifyError: 429 → rate_limit, honors Retry-After', () => {
   assert.equal(c.retryAfterMs, 3000)
 })
 
+test('classifyError: 429 with HTTP-date Retry-After → finite ms, never NaN', () => {
+  const future = new Date(Date.now() + 5000).toUTCString()
+  const c = classifyError(Object.assign(new Error('rate'), { status: 429, headers: { 'retry-after': future } }))
+  assert.equal(c.kind, 'rate_limit')
+  assert.equal(Number.isFinite(c.retryAfterMs), true)
+  assert.ok(c.retryAfterMs >= 0)
+})
+
+test('classifyError: 429 with unparseable Retry-After → undefined (not NaN)', () => {
+  const c = classifyError(Object.assign(new Error('rate'), { status: 429, headers: { 'retry-after': 'garbage' } }))
+  assert.equal(c.retryAfterMs, undefined)
+})
+
 test('classifyError: 401 → auth', () => {
   assert.equal(classifyError(Object.assign(new Error(), { status: 401 })).kind, 'auth')
 })
@@ -26,6 +39,11 @@ test('classifyError: 5xx → server, ECONNRESET → network', () => {
 test('classifyError: 404 responses route → endpoint_unavailable', () => {
   const err = Object.assign(new Error('not found'), { status: 404 })
   assert.equal(classifyError(err).kind, 'endpoint_unavailable')
+})
+
+test('classifyError: 400 "must contain the word json" → unsupported_schema (not bad_request)', () => {
+  const err = Object.assign(new Error("Prompt must contain the word 'json'"), { status: 400 })
+  assert.equal(classifyError(err).kind, 'unsupported_schema')
 })
 
 test('classifyError: local LlmError invalid_output passthrough', () => {

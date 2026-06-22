@@ -477,6 +477,7 @@ export default function initIpc() {
     baseURL: string
     model: string
     endpoint?: string
+    brand?: string
   }) => {
     try {
       const { resolveModelFamily } = await import(
@@ -485,19 +486,23 @@ export default function initIpc() {
       const { resolveDialect } = await import(
         '@geekgeekrun/boss-auto-browse-and-chat/llm/dialects/index.mjs'
       )
+      const { resolveModelProfile } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/profiles.mjs'
+      )
       const family = resolveModelFamily(payload.model)
       const dialect = resolveDialect({
         baseURL: payload.baseURL,
-        brandLock: 'auto',
+        brandLock: payload.brand ?? 'auto',
         endpoint: payload.endpoint ?? 'auto',
         family
       })
+      const profile = resolveModelProfile({ dialect, family, userOverrides: {} })
       return {
         dialectId: dialect.id,
         label: dialect.label,
         isReasoningModel: family.isReasoningModel,
-        effortValues: family.effortValues ?? null,
-        thinkingStyle: dialect.thinkingStyle
+        effortValues: profile.effortValues ?? null,
+        thinkingStyle: profile.thinkingStyle
       }
     } catch {
       return {
