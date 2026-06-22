@@ -10,7 +10,9 @@ const DEFAULT_TIMEOUT_MS = 60000
 const STREAM_IDLE_MS = 30000
 
 function defaultClientFactory (model) {
-  return new OpenAI({ baseURL: model.baseURL, apiKey: model.apiKey })
+  // maxRetries: 0 —— 所有重试由 failover 层(classifyError/decideNext + maxAttemptsPerModel)统一管理;
+  // 否则 SDK 默认会先内部重试 429/5xx,绕过失败策略并吃掉 totalDeadlineMs。
+  return new OpenAI({ baseURL: model.baseURL, apiKey: model.apiKey, maxRetries: 0 })
 }
 
 function initSchemaMode (schema, profile) {
