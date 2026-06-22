@@ -59,6 +59,35 @@ test('non-reasoning model: purpose default used as-is (no headroom)', async () =
   assert.equal(captured.req.max_tokens, 500)
 })
 
+test('qwen thinking → streaming path aggregates content + reasoning + usage', async () => {
+  const captured = {}
+  const streamFactory = () => ({
+    chat: {
+      completions: {
+        create: async (req) => {
+          captured.req = req
+          async function * gen () {
+            yield { choices: [{ delta: { reasoning_content: 'think' } }] }
+            yield { choices: [{ delta: { content: '{"pass":true,"reason":"ok"}' } }] }
+            yield { usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } }
+          }
+          return gen()
+        }
+      }
+    }
+  })
+  const qwenModel = {
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk', model: 'qwq-32b',
+    brand: 'auto', endpoint: 'auto', thinking: { enabled: true, budget: 1024 }, sampling: {}
+  }
+  const schema = { name: 'r', schema: { type: 'object', required: ['pass'] } }
+  const r = await chatComplete(qwenModel, [{ role: 'user', content: 'hi' }], { schema, maxOutputTokens: 200, _clientFactory: streamFactory })
+  assert.equal(captured.req.stream, true)
+  assert.deepEqual(r.parsed, { pass: true, reason: 'ok' })
+  assert.equal(r.reasoning, 'think')
+  assert.equal(r.usage.total, 7)
+})
+
 test('invalid json throws LlmError invalid_output', async () => {
   const factory = () => ({ chat: { completions: { create: async () => ({ choices: [{ message: { content: 'nope' } }], usage: {} }) } } })
   const schema = { name: 'r', schema: { type: 'object', required: ['pass'] } }

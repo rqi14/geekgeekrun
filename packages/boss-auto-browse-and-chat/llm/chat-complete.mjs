@@ -4,8 +4,10 @@ import { resolveDialect } from './dialects/index.mjs'
 import { resolveModelProfile } from './profiles.mjs'
 import { validateAgainstSchema } from './schema-validate.mjs'
 import { normalizeUsage } from './usage.mjs'
+import { LlmError } from './errors.mjs'
 
 const DEFAULT_TIMEOUT_MS = 60000
+const STREAM_IDLE_MS = 30000
 
 function defaultClientFactory (model) {
   return new OpenAI({ baseURL: model.baseURL, apiKey: model.apiKey })
@@ -31,17 +33,40 @@ function injectSchemaPrompt (messages, schema) {
   return copy
 }
 
-async function aggregateStream (stream) {
-  let content = ''
-  let reasoning = ''
-  let usage = null
-  for await (const chunk of stream) {
-    const delta = chunk?.choices?.[0]?.delta ?? {}
-    if (delta.content) content += delta.content
-    if (delta.reasoning_content) reasoning += delta.reasoning_content
-    if (chunk?.usage) usage = chunk.usage
+/**
+ * 流式调用 + 聚合(Qwen thinking 用)。在总超时之外附加「流空闲超时」:每个 chunk 重置计时,
+ * 超过 idleMs 没有新 chunk 即中止,归类为可重试的 stream_timeout(spec §3.5 step 5)。
+ */
+async function streamChat (client, req, totalSignal, idleMs) {
+  const idle = new AbortController()
+  let timer
+  const arm = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => idle.abort(), idleMs)
   }
-  return { choices: [{ message: { content, reasoning_content: reasoning || null } }], usage }
+  const signal = typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([totalSignal, idle.signal])
+    : totalSignal
+  arm()
+  try {
+    const stream = await client.chat.completions.create(req, { signal })
+    let content = ''
+    let reasoning = ''
+    let usage = null
+    for await (const chunk of stream) {
+      arm()
+      const delta = chunk?.choices?.[0]?.delta ?? {}
+      if (delta.content) content += delta.content
+      if (delta.reasoning_content) reasoning += delta.reasoning_content
+      if (chunk?.usage) usage = chunk.usage
+    }
+    return { choices: [{ message: { content, reasoning_content: reasoning || null } }], usage }
+  } catch (err) {
+    if (idle.signal.aborted) throw new LlmError('stream_timeout', 'stream idle timeout')
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -89,8 +114,7 @@ export async function chatComplete (model, messages, opts = {}) {
   if (profile.endpoint === 'responses') {
     raw = await client.responses.create(req, { signal })
   } else if (req.stream) {
-    const stream = await client.chat.completions.create(req, { signal })
-    raw = await aggregateStream(stream)
+    raw = await streamChat(client, req, signal, opts.idleMs ?? STREAM_IDLE_MS)
   } else {
     raw = await client.chat.completions.create(req, { signal })
   }

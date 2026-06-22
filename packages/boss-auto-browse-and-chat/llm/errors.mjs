@@ -54,7 +54,9 @@ export function classifyError (err) {
   if (status === 401 || status === 403) return { kind: 'auth' }
   if (status === 404) return { kind: 'endpoint_unavailable' }
   if (status === 400) {
-    if (/response_format|json_schema|text\.format|schema|tool|function/.test(text)) return { kind: 'unsupported_schema' }
+    // 含 must-contain-json:provider 拒绝 json_object 模式(prompt 未含 "json")→ 视为结构化输出问题,
+    // 触发 schema_downgrade 走到 prompt-only,而非误判 bad_request 直接换模型。
+    if (/response_format|json_schema|text\.format|json[_\s-]?object|must contain the word|schema|tool|function/.test(text)) return { kind: 'unsupported_schema' }
     if (/maximum context|context length|too long|reduce the length/.test(text)) return { kind: 'context_overflow' }
     if (/temperature|top_p|unsupported parameter|unknown parameter|reasoning_effort/.test(text)) return { kind: 'unsupported_param' }
     return { kind: 'bad_request' }

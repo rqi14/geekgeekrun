@@ -56,6 +56,18 @@ test('sampling values coerced: numeric string → number, garbage → null', () 
   assert.equal(s.max_tokens, 800) // number preserved
 })
 
+test('thinking budget/effort invalid → fall back to defaults', () => {
+  const v2 = migrateToV2({
+    version: 2,
+    providers: [{ id: 'p', baseURL: 'u', apiKey: 'k', models: [{ id: 'm', model: 'A', enabled: true, thinking: { enabled: true, budget: 999999, effort: 'ultra' } }] }],
+    purposes: {}, retry: {}
+  })
+  const t = v2.providers[0].models[0].thinking
+  assert.equal(t.budget, 2048) // out of 128–32768 → default
+  assert.equal(t.effort, 'medium') // invalid effort → default
+  assert.equal(t.enabled, true) // valid bool preserved
+})
+
 test('unknown fields preserved', () => {
   const x = { version: 2, providers: [], purposes: {}, retry: {}, _customField: 42 }
   const v2 = migrateToV2(x)

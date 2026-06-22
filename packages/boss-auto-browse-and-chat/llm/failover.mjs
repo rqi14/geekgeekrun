@@ -82,8 +82,11 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
     let working = { ...model, endpoint: currentEndpoint }
 
     // 同模型循环:retry_same / endpoint_downgrade / schema_downgrade
-    // 上限保护:总步数不超过 maxAttempts + 几次确定性降级
-    for (let guard = 0; guard < (retry.maxAttemptsPerModel + 5); guard++) {
+    // 上限 = retry_same 次数 + 确定性降级步数(schema 链各级 + 1 次 endpoint 降级)+ 首发,
+    // 由实际步数推出,不用魔数。
+    const guardMax = retry.maxAttemptsPerModel + SCHEMA_CHAIN.length + 2
+    let advanced = false
+    for (let guard = 0; guard < guardMax; guard++) {
       const remaining = deadline - Date.now()
       if (remaining <= 0) {
         failures.push({ id: model.id, kind: 'deadline' })
@@ -123,9 +126,12 @@ export async function chatCompleteForPurpose (config, purpose, messages, opts = 
         }
         // next_model
         failures.push({ id: model.id, kind, reason: redact(err.message, model) })
+        advanced = true
         break
       }
     }
+    // guard 用尽仍未 return/换模型 → 记录,避免聚合错误漏掉该模型
+    if (!advanced) failures.push({ id: model.id, kind: 'exhausted' })
   }
   return throwAggregate(failures)
 }

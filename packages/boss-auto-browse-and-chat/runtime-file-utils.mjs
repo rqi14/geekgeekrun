@@ -282,6 +282,7 @@ const bossLlmConfigFileName = 'boss-llm.json'
 const PURPOSE_KEYS = ['resume_screening', 'rubric_generation', 'greeting_generation', 'message_rewrite', 'default']
 const VALID_ENDPOINT = ['auto', 'chat', 'responses']
 const VALID_BRAND = ['auto', 'qwen', 'deepseek', 'glm', 'openai', 'generic']
+const VALID_EFFORT = ['minimal', 'low', 'medium', 'high']
 
 function defaultRetry () {
   return { maxAttemptsPerModel: 2, backoffMs: 500, maxBackoffMs: 20000, totalDeadlineMs: 120000 }
@@ -312,10 +313,12 @@ function normalizeModel (m) {
   }
   out.sampling = cleanSampling
   const t = out.thinking && typeof out.thinking === 'object' ? out.thinking : {}
+  // thinking 同样按已知字段非法回落:budget 限 128–32768,effort 限已知档位
+  const validBudget = typeof t.budget === 'number' && t.budget >= 128 && t.budget <= 32768
   out.thinking = {
     enabled: typeof t.enabled === 'boolean' ? t.enabled : false,
-    budget: typeof t.budget === 'number' ? t.budget : 2048,
-    effort: typeof t.effort === 'string' ? t.effort : 'medium'
+    budget: validBudget ? t.budget : 2048,
+    effort: VALID_EFFORT.includes(t.effort) ? t.effort : 'medium'
   }
   return out
 }

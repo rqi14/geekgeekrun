@@ -41,6 +41,11 @@ test('classifyError: 404 responses route → endpoint_unavailable', () => {
   assert.equal(classifyError(err).kind, 'endpoint_unavailable')
 })
 
+test('classifyError: 400 "must contain the word json" → unsupported_schema (not bad_request)', () => {
+  const err = Object.assign(new Error("Prompt must contain the word 'json'"), { status: 400 })
+  assert.equal(classifyError(err).kind, 'unsupported_schema')
+})
+
 test('classifyError: local LlmError invalid_output passthrough', () => {
   assert.equal(classifyError(new LlmError('invalid_output', 'bad json')).kind, 'invalid_output')
 })
