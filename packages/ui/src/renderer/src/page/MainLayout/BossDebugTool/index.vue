@@ -730,7 +730,7 @@ const recoCloseResume = async () => {
 }
 
 const recoReject = async (card: RecoCard) => {
-  await recoCmd('reject', { encryptGeekId: card.encryptGeekId, reason: '调试-不合适' })
+  await recoCmd('reject', { encryptGeekId: card.encryptGeekId, card })
 }
 
 // ── Tab B：区域 2 — 提取简历文本 ──────────────────────────────────────────────

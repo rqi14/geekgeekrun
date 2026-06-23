@@ -60,6 +60,9 @@ const runDebug = async () => {
   const { detectState } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/page-state.mjs'
   )) as any
+  const { classifyRejectReason } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/pure/reject-reason-classifier.mjs'
+  )) as any
   const { createHumanCursor } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/humanMouse.mjs'
   )) as any
@@ -248,30 +251,10 @@ const runDebug = async () => {
           const opts: string[] = (popup.items && popup.items.length ? popup.items : popup.fallback) || []
           steps.allOptions = opts
           if (!opts.length) { reply(false, steps, '原因弹窗内未识别到可选项——用「诊断不合适」'); break }
-          // 自适应选原因:
-          // 1) 「其他原因」需要填输入框,不适合自动化 → 排除,只在没有具体项时才退而求其次。
-          // 2) 具体项随候选人 field 变化 → 用正则优先级表挑;都不中就选第一个具体项。
-          // 3) 选完必须点「提交」按钮(.my-subbmit button.btn),否则弹窗不关、reject 不生效。
-          const FIELD_PRIORITY: RegExp[] = [
-            ...(typeof cmd.reasonRegex === 'string' && cmd.reasonRegex ? [new RegExp(cmd.reasonRegex)] : []),
-            /不符|与职位不符|不合适|不匹配/,
-            /经验|资历|年限|工作经历/,
-            /学历|硕士|博士|本科|专业|院校|学校/,
-            /薪资|薪酬|期望薪|薪水/,
-            /异地|地点|城市|地区|通勤/,
-            /年龄/,
-            /活跃/,
-            /重复/,
-            /行业|方向|岗位|职位/
-          ]
-          const concrete = opts.filter((o: string) => !/其他/.test(o))
-          const pool = concrete.length ? concrete : opts // 万一全是「其他」才用全集
-          let chosen: string | null = null
-          for (const re of FIELD_PRIORITY) {
-            const hit = pool.find((o: string) => re.test(o))
-            if (hit) { chosen = hit; break }
-          }
-          if (!chosen) chosen = pool[0]
+          // 自动分类:按候选人真实属性(cmd.card)在动态选项里挑最贴切的具体原因,避开需填输入的「其他原因」。
+          const cls = classifyRejectReason(cmd.card || {}, opts)
+          steps.classify = { reason: cls.reason, basis: cls.basis }
+          const chosen: string = cls.reason || opts.find((o: string) => !/其他/.test(o)) || opts[0]
           steps.chosenReason = chosen
           const needsInput = /其他/.test(chosen)
 

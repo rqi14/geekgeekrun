@@ -70,6 +70,10 @@ export const NOT_INTERESTED_REASON_FALLBACK = '其他原因'
 /** 原因弹窗的关闭图标（未匹配到原因时点击以关闭弹窗，避免卡住后续操作） */
 export const NOT_INTERESTED_REASON_POPUP_CLOSE_SELECTOR = 'div.card-reason-f1.show div.close-icon'
 
+/** 原因弹窗的「提交」按钮。选具体原因通常即时生效并关闭；个别情况（如选「其他原因」填完文字）需点提交。 */
+export const NOT_INTERESTED_REASON_SUBMIT_SELECTOR =
+  'div.card-reason-f1.show .my-subbmit button.btn, div.card-reason-f1.show .feed-back-list button.btn'
+
 // ── 推荐牛人页重构 v2 选择器（对照 dev/snapshots/ 校验） ──
 
 /** 主候选卡：li.card-item 内的主卡 card-inner（带 data-geek）。排除 similar-geek-wrap/quick-top。 */

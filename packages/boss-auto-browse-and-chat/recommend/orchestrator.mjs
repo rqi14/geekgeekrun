@@ -89,7 +89,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         if (hooks?.onCandidateFiltered)
           await hooks.onCandidateFiltered.promise([c], { matched: false, reason: pre.reason }).catch(() => {})
         if (budgets.x > 0 && shouldClickX(cfg)) {
-          if (await rejectFromList(page, frame, cursor, c.encryptGeekId, pre.reason)) budgets.x--
+          if (await rejectFromList(page, frame, cursor, c.encryptGeekId, pre.reason, c)) budgets.x--
         }
         seen.add(c.encryptGeekId)
         newCount++
@@ -123,7 +123,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       if (scored.hardReject) {
         await closeResume(page, frame, cursor)
         if (budgets.x > 0 && shouldClickX(cfg)) {
-          if (await rejectFromList(page, frame, cursor, c.encryptGeekId, scored.reason)) budgets.x--
+          if (await rejectFromList(page, frame, cursor, c.encryptGeekId, scored.reason, c)) budgets.x--
         }
       } else if (scored.score >= cfg.minScoreToChat && budgets.greet > 0) {
         if (hooks?.beforeStartChat) await hooks.beforeStartChat.promise(c).catch(() => {})
