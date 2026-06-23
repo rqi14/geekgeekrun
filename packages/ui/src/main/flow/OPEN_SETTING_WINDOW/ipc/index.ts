@@ -850,6 +850,23 @@ export default function initIpc() {
     bossChatDebugReadyDefer = null
   }
 
+  // 推荐牛人页调试 worker（与沟通页调试同构，独立进程/状态）
+  let bossRecommendDebugProcess: ChildProcess | null = null
+  let bossRecommendDebugReadyDefer: PromiseWithResolvers<void> | null = null
+  const bossRecommendDebugPendingCmds = new Map<string, PromiseWithResolvers<any>>()
+
+  const closeBossRecommendDebug = () => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      try {
+        bossRecommendDebugProcess.kill('SIGTERM')
+      } catch {
+        // 进程可能已退出（如用户关闭浏览器），忽略
+      }
+    }
+    bossRecommendDebugProcess = null
+    bossRecommendDebugReadyDefer = null
+  }
+
   ipcMain.handle('open-boss-chat-debug', async (ev) => {
     // 若 worker 已在运行，直接返回
     if (bossChatDebugProcess && !bossChatDebugProcess.killed) {
@@ -940,6 +957,97 @@ export default function initIpc() {
 
   ipcMain.handle('close-boss-chat-debug', () => {
     closeBossChatDebug()
+    return { ok: true }
+  })
+
+  // ── 推荐牛人页调试 worker ───────────────────────────────────────────────────
+  ipcMain.handle('open-boss-recommend-debug', async (ev) => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      return { ok: true, alreadyRunning: true }
+    }
+    let puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+    if (!puppeteerExecutable) {
+      try {
+        const parent = BrowserWindow.fromWebContents(ev.sender) || undefined
+        await configWithBrowserAssistant({ autoFind: true, windowOption: { parent, modal: !!parent, show: true } })
+        puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+      } catch { /**/ }
+    }
+    if (!puppeteerExecutable) {
+      return { ok: false, error: 'NO_BROWSER' }
+    }
+    bossRecommendDebugReadyDefer = Promise.withResolvers()
+    bossRecommendDebugProcess = childProcess.spawn(
+      process.argv[0],
+      process.env.NODE_ENV === 'development'
+        ? [process.argv[1], '--mode=bossRecommendDebugMain']
+        : ['--mode=bossRecommendDebugMain'],
+      {
+        env: { ...process.env, PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath, GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME },
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe']
+      }
+    )
+    bossRecommendDebugProcess.once('exit', () => {
+      bossRecommendDebugProcess = null
+      bossRecommendDebugReadyDefer = null
+      mainWindow?.webContents.send('boss-recommend-debug-exited')
+      for (const [, defer] of bossRecommendDebugPendingCmds) {
+        defer.reject(new Error('worker exited'))
+      }
+      bossRecommendDebugPendingCmds.clear()
+    })
+    ;(bossRecommendDebugProcess.stdio[4] as NodeJS.ReadableStream).pipe(JSONStream.parse()).on('data', (msg: any) => {
+      if (msg?.type === 'READY') {
+        if (msg.ok) {
+          bossRecommendDebugReadyDefer?.resolve()
+          mainWindow?.webContents.send('boss-recommend-debug-ready')
+        } else {
+          bossRecommendDebugReadyDefer?.reject(new Error(msg.error ?? 'READY failed'))
+        }
+        return
+      }
+      if (msg?.id) {
+        const defer = bossRecommendDebugPendingCmds.get(msg.id)
+        if (defer) {
+          bossRecommendDebugPendingCmds.delete(msg.id)
+          if (msg.ok) { defer.resolve(msg.result) } else { defer.reject(new Error(msg.error ?? 'command failed')) }
+        }
+      }
+    })
+    try {
+      await bossRecommendDebugReadyDefer.promise
+      return { ok: true }
+    } catch (err: any) {
+      closeBossRecommendDebug()
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('boss-recommend-debug-command', async (_, cmd: { type: string; [k: string]: any }) => {
+    if (!bossRecommendDebugProcess || bossRecommendDebugProcess.killed) {
+      return { ok: false, error: 'DEBUG_WORKER_NOT_RUNNING' }
+    }
+    const id = Math.random().toString(36).slice(2)
+    const defer = Promise.withResolvers<any>()
+    bossRecommendDebugPendingCmds.set(id, defer)
+    pipeWriteRegardlessError(
+      bossRecommendDebugProcess.stdio[3] as WriteStream,
+      JSON.stringify({ ...cmd, id }) + '\n'
+    )
+    try {
+      const result = await Promise.race([
+        defer.promise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000))
+      ])
+      return { ok: true, result }
+    } catch (err: any) {
+      bossRecommendDebugPendingCmds.delete(id)
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('close-boss-recommend-debug', () => {
+    closeBossRecommendDebug()
     return { ok: true }
   })
   // ── end 招聘端调试工具 ───────────────────────────────────────────────────────

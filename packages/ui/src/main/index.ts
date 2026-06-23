@@ -89,6 +89,13 @@ const runMode = commandlineArgs['mode']
       waitForProcessHandShakeAndRunDebug()
       break
     }
+    case 'bossRecommendDebugMain': {
+      const { waitForProcessHandShakeAndRunDebug } = await import(
+        './flow/BOSS_RECOMMEND_DEBUG_MAIN/index'
+      )
+      waitForProcessHandShakeAndRunDebug()
+      break
+    }
     // #endregion
 
     // #region user entry
