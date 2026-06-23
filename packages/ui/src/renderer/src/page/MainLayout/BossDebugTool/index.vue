@@ -391,6 +391,15 @@
                 打招呼（当前简历）
               </el-button>
               <el-button
+                type="danger"
+                plain
+                :loading="recoBusy === 'reject'"
+                :disabled="!recoReady"
+                @click="recoCmd('reject')"
+              >
+                不合适（当前简历）
+              </el-button>
+              <el-button
                 :loading="recoBusy === 'close-resume'"
                 :disabled="!recoReady"
                 @click="recoCloseResume"

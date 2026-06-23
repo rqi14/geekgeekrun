@@ -190,60 +190,111 @@ const runDebug = async () => {
         }
 
         case 'reject': {
-          // 列表卡片「不感兴趣」自适应版:点 X → 等原因弹窗 → 自适应选原因(优先「其他原因」,
-          // 否则选最后一项,以适配每个职位选项不同)→ 等弹窗关闭。逐步返回结果便于诊断。
+          // 自适应:简历弹窗开着→点弹窗内「不合适」(.btn-quxiao);否则点列表卡片 X(div.tooltip-wrap.suitable)。
+          // 点完都等原因弹窗(宽松匹配)→ 自适应选原因(优先「其他」否则末项)→ 必要时点确认 → 等关闭。
           if (!frame) { reply(false, null, '未找到 recommendFrame'); break }
           const { encryptGeekId } = cmd
-          if (!encryptGeekId) { reply(false, null, '缺少 encryptGeekId'); break }
           const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
           const steps: any = {}
 
-          const xHandle = await frame.evaluateHandle((id: string) => {
-            const inner = document.querySelector(`div.card-inner[data-geek="${id}"]`)
-            const li = inner ? inner.closest('li.card-item') : null
-            return li ? li.querySelector('div.tooltip-wrap.suitable') : null
-          }, encryptGeekId)
-          const x = xHandle.asElement()
-          steps.xFound = !!x
-          if (!x) { reply(false, steps, 'X(不感兴趣)按钮未找到——可能简历弹窗开着,或选择器已变,请用「诊断不合适」'); break }
-          await (cursor.click(x).catch(async () => { await (x as any).click().catch(() => {}) }))
-
-          let popupEl: any = null
-          for (let i = 0; i < 12; i++) {
-            await sleep(300)
-            popupEl = await frame.$('div.card-reason-f1.show')
-            if (popupEl) break
-          }
-          steps.reasonPopupAppeared = !!popupEl
-          if (!popupEl) { reply(false, steps, '原因弹窗未出现(div.card-reason-f1.show)——请用「诊断不合适」查看真实结构'); break }
-
-          const options: string[] = await frame.$$eval(
-            'div.card-reason-f1.show span.first-reason-item',
-            (els: any[]) => els.map((e) => (e.textContent || '').trim())
+          const modalOpen = await frame.evaluate(
+            () => !!document.querySelector('div.dialog-wrap.active .dialog-lib-resume')
           )
-          steps.options = options
-          const items = await frame.$$('div.card-reason-f1.show span.first-reason-item')
-          if (!items.length) { reply(false, steps, '原因弹窗内未找到选项(span.first-reason-item)——请用「诊断不合适」'); break }
-          let idx = options.findIndex((o) => o.includes('其他'))
-          if (idx < 0) idx = items.length - 1 // 自适应:没有「其他原因」就选最后一项
-          steps.chosenReason = options[idx]
-          await (cursor.click(items[idx]).catch(async () => { await (items[idx] as any).click().catch(() => {}) }))
+          steps.context = modalOpen ? 'modal' : 'list'
 
-          // 部分职位选完原因还需点确认按钮;尝试点一下常见确认按钮(有则点,无则忽略)
+          let btnHandle: any
+          if (modalOpen) {
+            btnHandle = await frame.evaluateHandle(
+              () =>
+                document.querySelector('div.dialog-wrap.active .dialog-lib-resume .btn-quxiao') ||
+                document.querySelector('.btn-quxiao')
+            )
+          } else {
+            if (!encryptGeekId) { reply(false, steps, '列表模式需要 encryptGeekId'); break }
+            btnHandle = await frame.evaluateHandle((id: string) => {
+              const inner = document.querySelector(`div.card-inner[data-geek="${id}"]`)
+              const li = inner ? inner.closest('li.card-item') : null
+              return li ? li.querySelector('div.tooltip-wrap.suitable') : null
+            }, encryptGeekId)
+          }
+          const btn = btnHandle.asElement()
+          steps.rejectBtnFound = !!btn
+          if (!btn) { reply(false, steps, '未找到「不合适」按钮——用「诊断不合适」查看'); break }
+          await (cursor.click(btn).catch(async () => { await (btn as any).click().catch(() => {}) }))
+
+          // 等原因弹窗(宽松:card-reason-f1 / 任意含 reason 的可见浮层)
+          let popup: any = null
+          for (let i = 0; i < 14; i++) {
+            await sleep(300)
+            popup = await frame.evaluate(() => {
+              const sels = ['div.card-reason-f1.show', '[class*="card-reason"]', '[class*="reason"][class*="show"]']
+              let p: Element | null = null
+              for (const s of sels) {
+                const el = document.querySelector(s)
+                if (el) { const r = el.getBoundingClientRect(); if (r.width > 2 && r.height > 2) { p = el; break } }
+              }
+              if (!p) return null
+              const items = Array.from(p.querySelectorAll('span.first-reason-item')).map((e) => (e.textContent || '').trim())
+              const fallback = Array.from(p.querySelectorAll('span,li'))
+                .map((e) => (e.textContent || '').trim())
+                .filter((t) => t && t.length <= 24)
+              return { className: (p as HTMLElement).className, items, fallback: fallback.slice(0, 40) }
+            })
+            if (popup) break
+          }
+          steps.reasonPopup = popup
+          if (!popup) { reply(false, steps, '点了「不合适」但未出现原因弹窗——可能直接生效或结构不同,用「诊断不合适」'); break }
+
+          const opts: string[] = (popup.items && popup.items.length ? popup.items : popup.fallback) || []
+          if (!opts.length) { reply(false, steps, '原因弹窗内未识别到可选项——用「诊断不合适」'); break }
+          // 自适应选原因:选项随候选人 field 变化,用「正则优先级表」按序匹配现有选项,
+          // 命中第一个就选;都不命中则选最后一项(通常是「其他原因」之类的兜底)。
+          // 可用 cmd.reasonRegex 传入自定义优先模式。
+          const REASON_PRIORITY: RegExp[] = [
+            ...(typeof cmd.reasonRegex === 'string' && cmd.reasonRegex ? [new RegExp(cmd.reasonRegex)] : []),
+            /其他/,
+            /不\s*(合适|符合|匹配)|不符/,
+            /(工作)?经验|资历|年限/,
+            /学历|专业|院校|学校/,
+            /薪资|薪酬|期望薪|薪水/,
+            /地点|城市|地区|异地|通勤/,
+            /行业|方向|岗位|职位/
+          ]
+          let idx = -1
+          for (const re of REASON_PRIORITY) {
+            const i = opts.findIndex((o: string) => re.test(o))
+            if (i >= 0) { idx = i; break }
+          }
+          if (idx < 0) idx = opts.length - 1
+          steps.chosenReason = opts[idx]
+          steps.allOptions = opts
+
+          const clicked = await frame.evaluate((wanted: string) => {
+            const p = document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"]')
+            if (!p) return false
+            const list = Array.from(p.querySelectorAll('span.first-reason-item'))
+            const cands = list.length ? list : Array.from(p.querySelectorAll('span,li'))
+            const el = cands.find((e) => (e.textContent || '').trim() === wanted) as HTMLElement | undefined
+            if (el) { el.click(); return true }
+            return false
+          }, opts[idx])
+          steps.reasonClicked = clicked
+
           await sleep(600)
-          const confirmed = await frame.evaluate(() => {
-            const pop = document.querySelector('div.card-reason-f1.show')
-            if (!pop) return 'popup-closed'
-            const btn = Array.from(pop.querySelectorAll('button,[class*="btn"],[class*="confirm"],[class*="submit"]'))
-              .find((b) => /确定|确认|提交|完成|确定优化/.test((b.textContent || '').trim())) as HTMLElement | undefined
-            if (btn) { btn.click(); return 'clicked-confirm' }
+          steps.confirmStep = await frame.evaluate(() => {
+            const p = document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"]')
+            if (!p) return 'popup-closed'
+            const b = Array.from(p.querySelectorAll('button,[class*="btn"]'))
+              .find((x) => /确定|确认|提交|完成/.test((x.textContent || '').trim())) as HTMLElement | undefined
+            if (b) { b.click(); return 'clicked-confirm' }
             return 'no-confirm-btn'
           })
-          steps.confirmStep = confirmed
           await sleep(700)
-          const popupGone = await frame.evaluate(() => !document.querySelector('div.card-reason-f1.show'))
-          steps.popupClosed = popupGone
-          reply(popupGone, steps, popupGone ? undefined : '已选原因但弹窗未关闭——请用「诊断不合适」看是否有未处理的确认控件')
+          const gone = await frame.evaluate(
+            () => !(document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"].show'))
+          )
+          steps.popupClosed = gone
+          reply(gone, steps, gone ? undefined : '选了原因但弹窗未关——用「诊断不合适」看结构')
           break
         }
 
