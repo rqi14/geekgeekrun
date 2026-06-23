@@ -246,28 +246,34 @@ const runDebug = async () => {
           if (!popup) { reply(false, steps, '点了「不合适」但未出现原因弹窗——可能直接生效或结构不同,用「诊断不合适」'); break }
 
           const opts: string[] = (popup.items && popup.items.length ? popup.items : popup.fallback) || []
+          steps.allOptions = opts
           if (!opts.length) { reply(false, steps, '原因弹窗内未识别到可选项——用「诊断不合适」'); break }
-          // 自适应选原因:选项随候选人 field 变化,用「正则优先级表」按序匹配现有选项,
-          // 命中第一个就选;都不命中则选最后一项(通常是「其他原因」之类的兜底)。
-          // 可用 cmd.reasonRegex 传入自定义优先模式。
-          const REASON_PRIORITY: RegExp[] = [
+          // 自适应选原因:
+          // 1) 「其他原因」需要填输入框,不适合自动化 → 排除,只在没有具体项时才退而求其次。
+          // 2) 具体项随候选人 field 变化 → 用正则优先级表挑;都不中就选第一个具体项。
+          // 3) 选完必须点「提交」按钮(.my-subbmit button.btn),否则弹窗不关、reject 不生效。
+          const FIELD_PRIORITY: RegExp[] = [
             ...(typeof cmd.reasonRegex === 'string' && cmd.reasonRegex ? [new RegExp(cmd.reasonRegex)] : []),
-            /其他/,
-            /不\s*(合适|符合|匹配)|不符/,
-            /(工作)?经验|资历|年限/,
-            /学历|专业|院校|学校/,
+            /不符|与职位不符|不合适|不匹配/,
+            /经验|资历|年限|工作经历/,
+            /学历|硕士|博士|本科|专业|院校|学校/,
             /薪资|薪酬|期望薪|薪水/,
-            /地点|城市|地区|异地|通勤/,
+            /异地|地点|城市|地区|通勤/,
+            /年龄/,
+            /活跃/,
+            /重复/,
             /行业|方向|岗位|职位/
           ]
-          let idx = -1
-          for (const re of REASON_PRIORITY) {
-            const i = opts.findIndex((o: string) => re.test(o))
-            if (i >= 0) { idx = i; break }
+          const concrete = opts.filter((o: string) => !/其他/.test(o))
+          const pool = concrete.length ? concrete : opts // 万一全是「其他」才用全集
+          let chosen: string | null = null
+          for (const re of FIELD_PRIORITY) {
+            const hit = pool.find((o: string) => re.test(o))
+            if (hit) { chosen = hit; break }
           }
-          if (idx < 0) idx = opts.length - 1
-          steps.chosenReason = opts[idx]
-          steps.allOptions = opts
+          if (!chosen) chosen = pool[0]
+          steps.chosenReason = chosen
+          const needsInput = /其他/.test(chosen)
 
           const clicked = await frame.evaluate((wanted: string) => {
             const p = document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"]')
@@ -277,24 +283,34 @@ const runDebug = async () => {
             const el = cands.find((e) => (e.textContent || '').trim() === wanted) as HTMLElement | undefined
             if (el) { el.click(); return true }
             return false
-          }, opts[idx])
+          }, chosen)
           steps.reasonClicked = clicked
 
-          await sleep(600)
-          steps.confirmStep = await frame.evaluate(() => {
-            const p = document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"]')
-            if (!p) return 'popup-closed'
-            const b = Array.from(p.querySelectorAll('button,[class*="btn"]'))
-              .find((x) => /确定|确认|提交|完成/.test((x.textContent || '').trim())) as HTMLElement | undefined
-            if (b) { b.click(); return 'clicked-confirm' }
-            return 'no-confirm-btn'
+          // 若只能选「其他原因」,顺手填一句意见,否则提交无效
+          if (needsInput) {
+            steps.filledInput = await frame.evaluate(() => {
+              const p = document.querySelector('div.card-reason-f1.show')
+              const ipt = p?.querySelector('input.ipt') as HTMLInputElement | undefined
+              if (ipt) { ipt.value = '与岗位不匹配'; ipt.dispatchEvent(new Event('input', { bubbles: true })); return true }
+              return false
+            })
+          }
+
+          // 点「提交」
+          await sleep(400)
+          steps.submit = await frame.evaluate(() => {
+            const p = document.querySelector('div.card-reason-f1.show')
+            if (!p) return 'no-popup'
+            const btn = (p.querySelector('.my-subbmit button.btn')
+              || p.querySelector('.feed-back-list button.btn')
+              || Array.from(p.querySelectorAll('button')).find((b) => /提交/.test((b.textContent || '').trim()))) as HTMLElement | undefined
+            if (btn) { btn.click(); return 'clicked-submit' }
+            return 'no-submit-btn'
           })
-          await sleep(700)
-          const gone = await frame.evaluate(
-            () => !(document.querySelector('div.card-reason-f1.show') || document.querySelector('[class*="card-reason"].show'))
-          )
+          await sleep(800)
+          const gone = await frame.evaluate(() => !document.querySelector('div.card-reason-f1.show'))
           steps.popupClosed = gone
-          reply(gone, steps, gone ? undefined : '选了原因但弹窗未关——用「诊断不合适」看结构')
+          reply(gone, steps, gone ? undefined : '选了原因+点了提交但弹窗仍未关——把本条 steps 贴我')
           break
         }
 
