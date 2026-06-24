@@ -198,7 +198,8 @@ function jobFilterToCandidateFilter (jobFilter) {
     expectMajorKeywords: Array.isArray(f.expectMajorKeywords) ? f.expectMajorKeywords : [],
     blockCandidateNameRegExpStr:
       typeof f.blockCandidateNameRegExpStr === 'string' ? f.blockCandidateNameRegExpStr : '',
-    skipViewedCandidates: f.skipViewedCandidates === true
+    skipViewedCandidates: f.skipViewedCandidates === true,
+    nativeFilter: f.nativeFilter && typeof f.nativeFilter === 'object' ? f.nativeFilter : undefined
   }
 }
 

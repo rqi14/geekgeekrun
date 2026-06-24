@@ -6,5 +6,6 @@
   "expectSalaryWhenNegotiable": "exclude",
   "expectSkillKeywords": [],
   "blockCandidateNameRegExpStr": "",
-  "skipViewedCandidates": false
+  "skipViewedCandidates": false,
+  "nativeFilter": { "enabled": false }
 }
