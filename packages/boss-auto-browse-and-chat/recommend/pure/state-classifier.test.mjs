@@ -32,3 +32,15 @@ test('LIST when clean', () => {
 test('UNKNOWN when no list and nothing matches', () => {
   assert.equal(classifyState({ ...base, frameHasList: false }), STATES.UNKNOWN)
 })
+test('business-block VIP 拦截弹窗判为 QUOTA_BLOCKED（列表 iframe 仍在背后也不误判 LIST）', () => {
+  const s = {
+    mainText: 'VIP账号 120查看/60沟通 付费即表示同意《BOSS直聘增值服务协议》',
+    mainOverlayClasses: [
+      'boss-popup__wrapper boss-dialog boss-dialog__wrapper business-block-dialog business-block-wrap circle'
+    ],
+    frameOverlayClasses: [],
+    frameHasList: true,
+    verify: false
+  }
+  assert.equal(classifyState(s), STATES.QUOTA_BLOCKED)
+})

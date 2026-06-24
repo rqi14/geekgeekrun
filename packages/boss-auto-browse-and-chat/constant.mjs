@@ -96,6 +96,11 @@ export const RESUME_MODAL_CLOSE_SELECTOR = 'div.dialog-wrap.active .dialog-lib-r
 export const ACCOUNT_BANNED_TEXT_REGEXP = /账号.*不可使用|不可使用状态|登录\s*BOSS直聘手机APP查看详情/
 /** 今日额度用尽文案 */
 export const QUOTA_BLOCKED_TEXT_REGEXP = /今日.*(招呼|沟通).*上限|已达上限|超过.*上限/
+/** VIP 业务拦截弹窗（额度耗尽点击后弹出）的稳定 class 关键字；ID/文案不稳，按 class 判 */
+export const BUSINESS_BLOCK_DIALOG_CLASS_NEEDLE = 'business-block'
+/** 业务拦截弹窗的关闭按钮（右上角 X） */
+export const BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR =
+  '.business-block-wrap .boss-popup__close, .business-block-dialog .boss-popup__close'
 
 /** 模糊原因规则：internalReason → 选项文案需包含的子串（按序取第一个命中的选项；都不中用 NOT_INTERESTED_REASON_FALLBACK） */
 export const NOT_INTERESTED_FUZZY_RULES = {

@@ -1,4 +1,4 @@
-import { ACCOUNT_BANNED_TEXT_REGEXP, QUOTA_BLOCKED_TEXT_REGEXP } from '../../constant.mjs'
+import { ACCOUNT_BANNED_TEXT_REGEXP, QUOTA_BLOCKED_TEXT_REGEXP, BUSINESS_BLOCK_DIALOG_CLASS_NEEDLE } from '../../constant.mjs'
 
 export const STATES = {
   ACCOUNT_BANNED: 'ACCOUNT_BANNED',
@@ -26,6 +26,7 @@ export function classifyState (s) {
   if (has(s.frameOverlayClasses, 'card-reason-f1')) return STATES.LIST_REASON_PANEL
   if (has(s.mainOverlayClasses, 'dialog-wrap') && /选择原因/.test(s.mainText || '')) return STATES.RESUME_REJECT_DIALOG
   if (has(s.mainOverlayClasses, 'dialog-uninstall-extension')) return STATES.GOVERNANCE_NOTICE
+  if (has(s.mainOverlayClasses, BUSINESS_BLOCK_DIALOG_CLASS_NEEDLE)) return STATES.QUOTA_BLOCKED
   if (QUOTA_BLOCKED_TEXT_REGEXP.test(s.mainText || '')) return STATES.QUOTA_BLOCKED
   if (s.frameHasList) return STATES.LIST
   return STATES.UNKNOWN
