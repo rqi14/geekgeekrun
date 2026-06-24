@@ -6,7 +6,9 @@
   "module": "./main/index.mjs",
   "type": "module",
   "scripts": {
-    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs"
+    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -F geekgeekrun-ui typecheck"
   },
   "author": "geekgeekrun",
   "license": "ISC",
