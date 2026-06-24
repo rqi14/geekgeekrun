@@ -1034,10 +1034,12 @@ export default function initIpc() {
       bossRecommendDebugProcess.stdio[3] as WriteStream,
       JSON.stringify({ ...cmd, id }) + '\n'
     )
+    // applyNativeFilter 含人类光标多次点击 + 等列表稳定，可能逼近 60s，单独放大超时避免孤儿回复
+    const cmdTimeoutMs = cmd.type === 'apply-native-filter' ? 150000 : 60000
     try {
       const result = await Promise.race([
         defer.promise,
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), cmdTimeoutMs))
       ])
       return { ok: true, result }
     } catch (err: any) {
