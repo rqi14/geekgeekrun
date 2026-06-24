@@ -730,7 +730,9 @@ const recoCloseResume = async () => {
 }
 
 const recoReject = async (card: RecoCard) => {
-  await recoCmd('reject', { encryptGeekId: card.encryptGeekId, card })
+  // card 是 Vue 响应式 Proxy，直接经 IPC 传会报 "An object could not be cloned"；深拷成纯对象。
+  const plainCard = JSON.parse(JSON.stringify(card))
+  await recoCmd('reject', { encryptGeekId: card.encryptGeekId, card: plainCard })
 }
 
 // ── Tab B：区域 2 — 提取简历文本 ──────────────────────────────────────────────
