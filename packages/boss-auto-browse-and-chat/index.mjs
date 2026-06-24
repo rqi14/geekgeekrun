@@ -420,6 +420,7 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
       rules: filterConfig,
       waveSize: recommendPageOpts.waveSize ?? 6,
       maxGreetPerRun: recommendPageOpts.maxGreetPerRun ?? maxChatPerRun,
+      maxViewPerRun: recommendPageOpts.maxViewPerRun ?? 20,
       maxXPerRun: recommendPageOpts.maxXPerRun ?? 10,
       maxScrollSteps: recommendPageOpts.maxScrollSteps ?? 6,
       maxStaleWaves: recommendPageOpts.maxStaleWaves ?? 2,
