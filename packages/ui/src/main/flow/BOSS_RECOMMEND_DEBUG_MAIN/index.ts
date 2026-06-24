@@ -61,7 +61,7 @@ const runDebug = async () => {
   const { detectState } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/page-state.mjs'
   )) as any
-  const { readQuota } = (await import(
+  const { readQuota, diagnoseQuota } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/quota-reader.mjs'
   )) as any
   const { classifyRejectReason } = (await import(
@@ -166,7 +166,13 @@ const runDebug = async () => {
         case 'read-quota': {
           // 只读：打开账号权益侧栏读今日剩余「查看/沟通」额度，再关回。不烧任何配额。
           const quota = await readQuota(page)
-          reply(true, { quota })
+          if (quota) {
+            reply(true, { quota })
+            break
+          }
+          // 读不到 → 再开一次侧栏收集逐步诊断（导航/iframe/tab/用量行/原始行/解析），定位卡点
+          const diag = await diagnoseQuota(page)
+          reply(true, { quota: null, diag })
           break
         }
 

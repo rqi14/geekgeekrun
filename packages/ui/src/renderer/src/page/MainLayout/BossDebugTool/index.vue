@@ -721,6 +721,7 @@ const recoReadQuota = async () => {
       ? `查看 ${q.view?.remaining ?? '?'}/${q.view?.total ?? '?'}，沟通 ${q.greet?.remaining ?? '?'}/${q.greet?.total ?? '?'}`
       : '读取失败（null）'
     addLog(`剩余配额：${recoQuota.value}`, q ? 'ok' : 'err')
+    if (!q && res.result?.diag) addLog(`配额诊断：${JSON.stringify(res.result.diag)}`, 'err')
   }
 }
 
