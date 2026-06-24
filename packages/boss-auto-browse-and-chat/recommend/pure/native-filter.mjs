@@ -9,9 +9,10 @@ export function normalizeOption (s) {
 }
 
 /**
- * 选项目录 = 合法值的唯一真相来源。options 为面板精确文案；options:null 表示动态（按职位变，如专业大类），
- * planner 不静态校验，交 driver 运行期回读。single/options 的真值需用 diagnose-filter 对真站点核对后定稿
- * （带 [单选] 的：活跃度/跳槽频率/薪资）。
+ * 选项目录 = 合法值的唯一真相来源。options/single/vip 均按实测 filter-panel HTML 核定。
+ * single 依面板 [单选] 标记：活跃度/跳槽频率/薪资为单选，其余多选。
+ * options:null 表示动态（按职位变，如专业大类），planner 不静态校验，交 driver 运行期回读。
+ * 年龄（vue-slider）交互方式不同，v1 不纳入。
  */
 export const NATIVE_FILTER_CATALOG = {
   // 免费维度
@@ -24,7 +25,9 @@ export const NATIVE_FILTER_CATALOG = {
   gender: { groupClass: 'gender', vip: true, single: false, options: ['男', '女'] },
   school: { groupClass: 'school', vip: true, single: false, options: ['985', '211', '双一流院校', '留学', '国内外名校', '公办本科'] },
   major: { groupClass: 'major', vip: true, single: false, options: null },
-  switchJobFrequency: { groupClass: 'switchJobFrequency', vip: true, single: true, options: ['5年少于3份', '平均每份工作大于1年'] }
+  switchJobFrequency: { groupClass: 'switchJobFrequency', vip: true, single: true, options: ['5年少于3份', '平均每份工作大于1年'] },
+  exchangeResumeWithColleague: { groupClass: 'exchangeResumeWithColleague', vip: true, single: false, options: ['近一个月没有'] },
+  recentNotView: { groupClass: 'recentNotView', vip: true, single: false, options: ['近14天没有'] }
 }
 
 /** catalog 里 vip:true 的组名集合，供 driver 判断是否需要展开折叠区 / VIP 锁。 */

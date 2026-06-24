@@ -203,6 +203,8 @@ export async function applyNativeFilter (page, frame, cursor, plan) {
   }
 }
 
-// LIVE-SMOKE PENDING: 经 BOSS_RECOMMEND_DEBUG_MAIN 的 `apply-native-filter` 调试命令在真账号上验证：
-// 免费维度生效、VIP 锁降级、零结果空态不挂、幂等重复一致、面板打不开报 panel-not-opened。
-// 并用 `diagnose-filter` 核对：触发器在 page/frame、各组 single 真值、选中态 class、空态选择器。
+// LIVE-SMOKE PENDING: 选择器/文案/single/选中态(active)/确定按钮 均已按实测 filter-panel HTML 写死。
+// 一次真账号 smoke 仅为端到端确认点击流通（机制本身已由现有 scrape/reject 调试命令验证过），并取两处
+// 无法从面板 HTML 得知的值：(1) major 各职位的专业大类文案（已设计为 options:null 运行期透传，不阻塞）；
+// (2) 筛到 0 人后的空态屏选择器 FILTER_LIST_EMPTY_SELECTOR（driver 有界超时兜底，未命中也不挂死）。
+// 用 `apply-native-filter` 跑一遍免费维度 + （有 VIP 时）VIP 维度即可。
