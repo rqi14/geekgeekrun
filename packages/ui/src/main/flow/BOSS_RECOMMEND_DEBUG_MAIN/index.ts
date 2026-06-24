@@ -9,6 +9,7 @@
  *   - scrape-cards：识别当前可见的候选人卡片，返回字段数组（姓名/学历/经验/技能/可达性等）
  *   - scroll：在列表上做一次温和滚动（加载下一波）
  *   - open-resume { encryptGeekId }：打开该候选人简历弹窗，校验身份并读取摘要
+ *   - capture-resume { encryptGeekId }：开简历→抓 canvas 在线简历全文→返回字数+前300字（验证 canvas 提取，烧1个查看额度）
  *   - greet：在已打开的简历弹窗里点「打招呼」
  *   - close-resume：关闭简历弹窗
  *   - reject { encryptGeekId, reason }：在列表上对该候选人点「不合适」
@@ -52,8 +53,11 @@ const runDebug = async () => {
   const { scrapeCards } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/list-scraper.mjs'
   )) as any
-  const { openResume, assertIdentity, readSummary, greetInModal, closeResume } = (await import(
+  const { openResume, assertIdentity, readSummary, greetInModal, closeResume, captureResumeText } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/resume-inspector.mjs'
+  )) as any
+  const { setupCanvasTextHook } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/resume-extractor.mjs'
   )) as any
   const { scrollGently } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/actions.mjs'
@@ -98,6 +102,9 @@ const runDebug = async () => {
   })
 
   const page = (await browser.pages())[0]
+
+  // canvas 钩子必须在 goto 之前装，evaluateOnNewDocument 才能覆盖后续创建的（嵌套）简历 iframe
+  const canvasHook = await setupCanvasTextHook(page)
 
   const bossCookies = readStorageFile('boss-cookies.json')
   const bossLocalStorage = readStorageFile('boss-local-storage.json')
@@ -198,6 +205,27 @@ const runDebug = async () => {
           const identityOk = geekName ? await assertIdentity(frame, geekName) : true
           const summary = await readSummary(frame).catch(() => null)
           reply(true, { opened: true, identityOk, summary })
+          break
+        }
+
+        case 'capture-resume': {
+          if (!frame) { reply(false, null, '未找到 recommendFrame'); break }
+          const { encryptGeekId, geekName } = cmd
+          if (!encryptGeekId) { reply(false, null, '缺少 encryptGeekId'); break }
+          await canvasHook.clearCapturedText(page).catch(() => {})
+          const opened = await openResume(page, frame, cursor, encryptGeekId)
+          if (!opened) { reply(false, { opened: false }, '打开简历失败（卡片可能已滚出或被拦截）'); break }
+          const identityOk = geekName ? await assertIdentity(frame, geekName) : true
+          const fullText = await captureResumeText(page, canvasHook)
+          const summary = await readSummary(frame).catch(() => ({ summary: '' }))
+          await closeResume(page, frame, cursor).catch(() => {})
+          reply(true, {
+            opened: true,
+            identityOk,
+            canvasChars: fullText.length,
+            canvasHead: fullText.slice(0, 300),
+            summaryChars: (summary?.summary || '').length
+          })
           break
         }
 

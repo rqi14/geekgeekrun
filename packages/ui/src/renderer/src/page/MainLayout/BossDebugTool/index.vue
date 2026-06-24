@@ -354,7 +354,7 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="290" fixed="right">
+              <el-table-column label="操作" width="360" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     size="small"
@@ -382,6 +382,15 @@
                     @click="recoCmd('diagnose-reject', { encryptGeekId: row.encryptGeekId })"
                   >
                     诊断
+                  </el-button>
+                  <el-button
+                    size="small"
+                    text
+                    :loading="recoBusy === 'capture-resume:' + row.encryptGeekId"
+                    :disabled="!recoReady || !row.interactable"
+                    @click="recoCaptureResume(row)"
+                  >
+                    抓全文
                   </el-button>
                 </template>
               </el-table-column>
@@ -747,6 +756,21 @@ const recoOpenResume = async (card: RecoCard) => {
     const s = res.result?.summary
     recoSummary.value = typeof s === 'string' ? s : JSON.stringify(s ?? '', null, 2)
     if (res.result?.identityOk === false) addLog('⚠ 简历身份校验未通过（姓名不匹配）', 'err')
+  }
+}
+
+const recoCaptureResume = async (card: RecoCard) => {
+  recoSummary.value = ''
+  const res = await recoCmd('capture-resume', {
+    encryptGeekId: card.encryptGeekId,
+    geekName: card.geekName
+  })
+  if (res?.ok && res.result?.opened) {
+    addLog(
+      `canvas 全文 ${res.result?.canvasChars ?? 0} 字（.resume-summary ${res.result?.summaryChars ?? 0} 字）`,
+      (res.result?.canvasChars ?? 0) > 0 ? 'ok' : 'err'
+    )
+    recoSummary.value = res.result?.canvasHead || '(canvas 为空)'
   }
 }
 
