@@ -5,6 +5,7 @@
  * 支持命令：
  *   - ping：探活
  *   - detect-state：返回当前推荐页状态（LIST / RESUME_MODAL / VERIFY / …）
+ *   - read-quota：只读，打开账号权益侧栏读今日剩余「查看/沟通」额度（不烧配额）
  *   - scrape-cards：识别当前可见的候选人卡片，返回字段数组（姓名/学历/经验/技能/可达性等）
  *   - scroll：在列表上做一次温和滚动（加载下一波）
  *   - open-resume { encryptGeekId }：打开该候选人简历弹窗，校验身份并读取摘要
@@ -59,6 +60,9 @@ const runDebug = async () => {
   )) as any
   const { detectState } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/page-state.mjs'
+  )) as any
+  const { readQuota } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/quota-reader.mjs'
   )) as any
   const { classifyRejectReason } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/pure/reject-reason-classifier.mjs'
@@ -150,6 +154,13 @@ const runDebug = async () => {
         case 'detect-state': {
           const state = await detectState(page, frame)
           reply(true, { state, hasFrame: !!frame })
+          break
+        }
+
+        case 'read-quota': {
+          // 只读：打开账号权益侧栏读今日剩余「查看/沟通」额度，再关回。不烧任何配额。
+          const quota = await readQuota(page)
+          reply(true, { quota })
           break
         }
 

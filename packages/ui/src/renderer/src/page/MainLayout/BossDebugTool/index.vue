@@ -314,7 +314,15 @@
               >
                 滚动加载下一波
               </el-button>
+              <el-button
+                :loading="recoBusy === 'read-quota'"
+                :disabled="!recoReady"
+                @click="recoReadQuota"
+              >
+                读取剩余配额
+              </el-button>
               <el-tag v-if="recoState" type="info">状态：{{ recoState }}</el-tag>
+              <el-tag v-if="recoQuota" type="warning">配额：{{ recoQuota }}</el-tag>
               <el-checkbox v-model="recoSnapshotOnFail" style="margin-left: auto">
                 失败时自动快照
               </el-checkbox>
@@ -475,6 +483,7 @@ const recoLaunching = ref(false)
 const recoReady = ref(false)
 const recoBusy = ref<string | null>(null) // 当前进行中的操作标识
 const recoState = ref<string>('')
+const recoQuota = ref<string>('')
 const recoCards = ref<RecoCard[]>([])
 const recoSummary = ref<string>('')
 const recoSnapshotOnFail = ref(true) // 操作失败时自动快照当前页面
@@ -702,6 +711,17 @@ const recoDetectState = async () => {
   const res = await recoCmd('detect-state')
   if (res?.ok)
     recoState.value = `${res.result?.state ?? '?'}${res.result?.hasFrame ? '' : '（未找到 recommendFrame）'}`
+}
+
+const recoReadQuota = async () => {
+  const res = await recoCmd('read-quota')
+  if (res?.ok) {
+    const q = res.result?.quota
+    recoQuota.value = q
+      ? `查看 ${q.view?.remaining ?? '?'}/${q.view?.total ?? '?'}，沟通 ${q.greet?.remaining ?? '?'}/${q.greet?.total ?? '?'}`
+      : '读取失败（null）'
+    addLog(`剩余配额：${recoQuota.value}`, q ? 'ok' : 'err')
+  }
 }
 
 const recoScrape = async () => {
