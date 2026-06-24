@@ -392,7 +392,7 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     // 设置网络拦截器 + Canvas hook（登录成功后立即启动，仅针对推荐牛人 Tab）
     // -----------------------------------------------------------------------
     const { getInterceptedData } = setupNetworkInterceptor(page)
-    await setupCanvasTextHook(page)
+    const canvasHook = await setupCanvasTextHook(page)
 
     // -----------------------------------------------------------------------
     // 读取配置（若指定 jobId 则使用 per-job 合并配置）
@@ -428,6 +428,7 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
       delayBetweenActionsMs: recommendPageOpts.delayBetweenActionsMs ?? [1500, 4000],
       minScoreToChat: config?.scoring?.minScoreToChat ?? 0,
       onScoreError: config?.scoring?.onScoreError ?? 'skip',
+      canvasHook,
       llm: {}
     }
 

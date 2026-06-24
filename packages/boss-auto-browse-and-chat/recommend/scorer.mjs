@@ -47,7 +47,9 @@ export function buildResumeText(candidate, resume) {
     candidate?.salary && `期望薪资：${candidate.salary}`,
     candidate?.skills && `优势：${candidate.skills}`,
     Array.isArray(candidate?.tags) && candidate.tags.length && `标签：${candidate.tags.join('、')}`,
-    resume?.summary && `\n经历概览：\n${resume.summary}`
+    resume?.fullText
+      ? `\n在线简历全文：\n${resume.fullText}`
+      : resume?.summary && `\n经历概览：\n${resume.summary}`
   ].filter(Boolean)
   return parts.join('\n')
 }

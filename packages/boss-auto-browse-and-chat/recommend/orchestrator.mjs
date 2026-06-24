@@ -5,7 +5,7 @@ import { scrapeCards } from './list-scraper.mjs'
 import { cheapPrescore } from './pure/prescore.mjs'
 import { ruleFilterList } from './pure/rule-filter.mjs'
 import { score } from './scorer.mjs'
-import { openResume, assertIdentity, readSummary, closeResume } from './resume-inspector.mjs'
+import { openResume, assertIdentity, readSummary, closeResume, captureResumeText } from './resume-inspector.mjs'
 import { rejectFromList, scrollGently, scrollCardIntoView, greetFromCard } from './actions.mjs'
 import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
@@ -110,6 +110,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     if (g === 'break') break
     if (g === 'retry') continue
     await scrollCardIntoView(frame, c.encryptGeekId)
+    if (cfg.canvasHook?.clearCapturedText) await cfg.canvasHook.clearCapturedText(page).catch(() => {})
     if (!await openResume(page, frame, cursor, c.encryptGeekId)) {
       if ((await detectState(page, frame)) === STATES.QUOTA_BLOCKED) {
         await closeBusinessBlock(page)
@@ -122,7 +123,9 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       await closeResume(page, frame, cursor)
       continue
     }
-    const resume = await readSummary(frame)
+    const summaryObj = await readSummary(frame)
+    const fullText = await captureResumeText(page, cfg.canvasHook)
+    const resume = { summary: summaryObj.summary, fullText: fullText || summaryObj.summary }
     const s = await score(c, resume, cfg, llmFn)
     scored.push({ candidate: c, score: s.score, hardReject: s.hardReject, reason: s.reason })
     await closeResume(page, frame, cursor)

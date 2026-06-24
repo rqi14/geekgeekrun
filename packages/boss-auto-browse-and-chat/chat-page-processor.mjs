@@ -19,6 +19,7 @@ import {
 import { filterCandidates } from './candidate-processor.mjs'
 import { checkIfAlreadyContacted, saveCandidateInfo, logContact } from './data-manager.mjs'
 import { setLevel, debug as logDebug, info as logInfo, warn as logWarn } from './logger.mjs'
+import { filterFontTestLines } from './recommend/pure/resume-text.mjs'
 import {
   BOSS_CHAT_PAGE_URL,
   CHAT_PAGE_ACTIVE_NAME_SELECTOR,
@@ -109,21 +110,6 @@ function extractNameFromResumeText (text) {
     return tokens[0]
   }
   return null
-}
-
-/**
- * 去除 canvas 简历文本开头的字体渲染预热数据。
- * BOSS 在 iframe 首次加载时会把所有 ASCII 可打印字符逐一 fillText 做字形预热（"bzl|abcde..."），
- * 这些数据在 extractResumeText 排序后会出现在真正简历内容之前。
- * 定位到首个含 "活跃" 的行，之前的行全部丢弃。
- * @param {string[]} lines - extractResumeText 返回的行数组
- * @returns {string[]} 去除预热数据后的行数组
- */
-function filterFontTestLines (lines) {
-  const idx = lines.findIndex(line => line.includes('活跃'))
-  if (idx > 0) return lines.slice(idx)
-  // 兜底：丢弃不含任何汉字的行
-  return lines.filter(line => /[\u4e00-\u9fff]/.test(line))
 }
 
 /**

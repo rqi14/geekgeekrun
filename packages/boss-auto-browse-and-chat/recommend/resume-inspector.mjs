@@ -1,5 +1,7 @@
 import { sleep } from '@geekgeekrun/utils/sleep.mjs'
 import { waitForState, STATES } from './page-state.mjs'
+import { extractResumeText } from '../resume-extractor.mjs'
+import { filterFontTestLines } from './pure/resume-text.mjs'
 import {
   RESUME_MODAL_SELECTOR,
   RESUME_GREET_BTN_SELECTOR,
@@ -97,3 +99,31 @@ export async function closeResume (page, frame, cursor) {
 // LIVE-SMOKE PENDING: in dev browser, call openResume (confirm returns true),
 // readSummary (confirm non-empty summary), greetInModal (confirm 继续沟通 / btn-outline-v2 detected),
 // closeResume (confirm returns to LIST). Use at most 1–2 candidates.
+
+/**
+ * 等 canvas 渲染稳定后抓取在线简历全文（嵌套 iframe 的 #resume，靠 fillText 钩子跨 frame 汇总到主页面）。
+ * 需传入 setupCanvasTextHook 返回的句柄 canvasHook。canvas 为空/无句柄时返回 ''（调用方降级用 .resume-summary）。
+ * @param {import('puppeteer').Page} page
+ * @param {{getCapturedText?:Function, peekCapturedText?:Function}} canvasHook
+ * @param {{timeoutMs?:number, intervalMs?:number, stableNeeded?:number}} [opts]
+ * @returns {Promise<string>}
+ */
+export async function captureResumeText (page, canvasHook, { timeoutMs = 6000, intervalMs = 400, stableNeeded = 2 } = {}) {
+  if (!canvasHook?.getCapturedText) return ''
+  const deadline = Date.now() + timeoutMs
+  let last = -1
+  let stable = 0
+  while (Date.now() < deadline) {
+    await sleep(intervalMs)
+    const n = canvasHook.peekCapturedText ? await canvasHook.peekCapturedText(page).catch(() => 0) : 0
+    if (n > 0 && n === last) {
+      if (++stable >= stableNeeded) break
+    } else {
+      stable = n > 0 ? 1 : 0
+    }
+    last = n
+  }
+  const captured = await canvasHook.getCapturedText(page).catch(() => [])
+  if (!captured.length) return ''
+  return filterFontTestLines(extractResumeText(captured)).join('\n')
+}
