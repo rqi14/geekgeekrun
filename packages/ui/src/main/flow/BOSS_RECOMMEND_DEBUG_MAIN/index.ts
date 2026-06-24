@@ -10,6 +10,7 @@
  *   - scroll：在列表上做一次温和滚动（加载下一波）
  *   - open-resume { encryptGeekId }：打开该候选人简历弹窗，校验身份并读取摘要
  *   - capture-resume { encryptGeekId }：开简历→抓 canvas 在线简历全文→返回字数+前300字（验证 canvas 提取，烧1个查看额度）
+ *   - dry-run-sequence { jobId?, onlyViewed? }：跑完整 sequence 但不打招呼（dryRun），可勾选只开已看过的简历（不烧额度），返回决策报告
  *   - greet：在已打开的简历弹窗里点「打招呼」
  *   - close-resume：关闭简历弹窗
  *   - reject { encryptGeekId, reason }：在列表上对该候选人点「不合适」
@@ -88,6 +89,12 @@ const runDebug = async () => {
   )) as any
   const { applyNativeFilter } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/native-filter-driver.mjs'
+  )) as any
+  const { runRecommendLoop } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/orchestrator.mjs'
+  )) as any
+  const { readRecommendConfig, buildRecommendCfgAndLlm } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/run-config.mjs'
   )) as any
 
   const { puppeteer } = await initPuppeteer()
@@ -226,6 +233,23 @@ const runDebug = async () => {
             canvasHead: fullText.slice(0, 300),
             summaryChars: (summary?.summary || '').length
           })
+          break
+        }
+
+        case 'dry-run-sequence': {
+          const { jobId, onlyViewed } = cmd
+          const { config, filterConfig, recommendPageOpts, maxChatPerRun } = readRecommendConfig(jobId)
+          const { recCfg, recLlmFn } = await buildRecommendCfgAndLlm({
+            config,
+            recommendPageOpts,
+            filterConfig,
+            maxChatPerRun
+          })
+          recCfg.canvasHook = canvasHook
+          recCfg.dryRun = true
+          recCfg.onlyViewed = !!onlyViewed
+          const report = await runRecommendLoop(page, getRecommendFrame, {}, recCfg, recLlmFn)
+          reply(true, { report })
           break
         }
 

@@ -323,6 +323,16 @@
               </el-button>
               <el-tag v-if="recoState" type="info">状态：{{ recoState }}</el-tag>
               <el-tag v-if="recoQuota" type="warning">配额：{{ recoQuota }}</el-tag>
+              <el-checkbox v-model="recoOnlyViewed">仅看已看过（不烧额度）</el-checkbox>
+              <el-button
+                type="warning"
+                plain
+                :loading="recoBusy === 'dry-run-sequence'"
+                :disabled="!recoReady"
+                @click="recoDryRun"
+              >
+                测试 Sequence（不打招呼）
+              </el-button>
               <el-checkbox v-model="recoSnapshotOnFail" style="margin-left: auto">
                 失败时自动快照
               </el-checkbox>
@@ -493,6 +503,8 @@ const recoReady = ref(false)
 const recoBusy = ref<string | null>(null) // 当前进行中的操作标识
 const recoState = ref<string>('')
 const recoQuota = ref<string>('')
+const recoOnlyViewed = ref(true)
+const recoDryRunJobId = ref<string>('')
 const recoCards = ref<RecoCard[]>([])
 const recoSummary = ref<string>('')
 const recoSnapshotOnFail = ref(true) // 操作失败时自动快照当前页面
@@ -732,6 +744,40 @@ const recoReadQuota = async () => {
     addLog(`剩余配额：${recoQuota.value}`, q ? 'ok' : 'err')
     if (!q && res.result?.diag) addLog(`配额诊断：${JSON.stringify(res.result.diag)}`, 'err')
   }
+}
+
+const recoDryRun = async () => {
+  recoSummary.value = ''
+  addLog(`→ [推荐页] dry-run-sequence（onlyViewed=${recoOnlyViewed.value}）—— 可能耗时较久（开简历+LLM 评分）`)
+  const res = await recoCmd('dry-run-sequence', {
+    jobId: recoDryRunJobId.value || undefined,
+    onlyViewed: recoOnlyViewed.value
+  })
+  const r = res?.ok && res.result?.report
+  if (!r) return
+  addLog(
+    `收集池 ${r.pool} ｜ 开简历 ${r.opened} ｜ 打分 ${r.scored?.length ?? 0} ｜ 拟打招呼 ${r.wouldGreet?.length ?? 0}`,
+    'ok'
+  )
+  for (const s of r.scored ?? []) {
+    addLog(
+      `  ${s.geekName} 分${s.score}${s.hardReject ? '(硬拒)' : ''} 简历${s.resumeChars}字${s.hasViewed ? ' [已看过]' : ''} — ${s.reason ?? ''}`,
+      s.hardReject ? 'err' : 'info'
+    )
+  }
+  const lines = [
+    `收集 ${r.pool}，开简历 ${r.opened}，打分 ${r.scored?.length ?? 0}`,
+    '',
+    '拟打招呼（不会真打）：',
+    ...(r.wouldGreet ?? []).map((w: any) => `  ${w.geekName}  分${w.score}`),
+    '',
+    '逐人评分：',
+    ...(r.scored ?? []).map(
+      (s: any) =>
+        `  ${s.geekName} 分${s.score}${s.hardReject ? '(硬拒)' : ''} 简历${s.resumeChars}字${s.hasViewed ? ' [已看过]' : ''}\n    ${s.reason ?? ''}`
+    )
+  ]
+  recoSummary.value = lines.join('\n')
 }
 
 const recoScrape = async () => {
