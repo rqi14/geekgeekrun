@@ -683,6 +683,15 @@ const recoCmd = async (type: string, params: Record<string, any> = {}) => {
   } catch (err: any) {
     addLog(`← [推荐页] ${type}: 异常 ${err?.message}`, 'err')
     ElMessage({ type: 'error', message: err?.message })
+    // 异常同样自动快照(之前只在命令返回失败时存,异常不存)
+    if (recoSnapshotOnFail.value && type !== 'snapshot') {
+      try {
+        const snap = await ipcRenderer.invoke('boss-recommend-debug-command', { type: 'snapshot', tag: type + '-exc' })
+        if (snap?.ok) addLog(`📸 异常快照：${snap.result?.png}`, 'info')
+      } catch {
+        /* 忽略 */
+      }
+    }
     return { ok: false, error: err?.message }
   } finally {
     recoBusy.value = null

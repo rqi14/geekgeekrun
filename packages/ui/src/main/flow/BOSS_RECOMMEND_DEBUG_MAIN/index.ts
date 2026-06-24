@@ -375,6 +375,11 @@ const runDebug = async () => {
             }
           })
           diag.reasonPopup = popup
+          // dump 完关掉原因弹窗,避免残留挡住后续操作
+          await frame.evaluate(() => {
+            const c = document.querySelector('div.card-reason-f1.show div.close-icon') as HTMLElement | null
+            if (c) c.click()
+          }).catch(() => {})
           reply(true, diag)
           break
         }
