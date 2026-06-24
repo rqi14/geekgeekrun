@@ -24,6 +24,15 @@
       <div class="flow-hint">流程：卡片初筛(省点击) → 开简历LLM精排 → 按分打招呼。</div>
 
       <div class="action-bar">
+        <el-select
+          v-model="selectedJobId"
+          clearable
+          filterable
+          placeholder="运行职位（默认=BOSS 当前选中）"
+          style="width: 240px"
+        >
+          <el-option v-for="j in jobs" :key="j.jobId" :label="j.jobName" :value="j.jobId" />
+        </el-select>
         <el-button :loading="isSaving" :disabled="!!regexError" @click="handleSave"
           >仅保存</el-button
         >
@@ -114,6 +123,8 @@ const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 const sequenceJobsEnabled = ref(false)
 const models = ref<Array<{ id: string; label: string }>>([])
+const jobs = ref<Array<{ jobId: string; jobName: string }>>([])
+const selectedJobId = ref<string>('') // 空 = 用 BOSS 页当前选中的职位,不切换
 
 const state = reactive(normalizeRecommendConfig({})) as RecommendConfigState
 
@@ -140,6 +151,15 @@ onMounted(async () => {
     models.value = await fetchEnabledModels()
   } catch (err) {
     console.error('[RecommendAutomation] 拉取模型失败', err)
+  }
+  try {
+    const jobsConfig = await ipcRenderer.invoke('fetch-boss-jobs-config')
+    jobs.value = (jobsConfig?.jobs ?? []).map((j: { jobId?: string; id?: string; jobName?: string; name?: string }) => ({
+      jobId: j.jobId ?? j.id ?? '',
+      jobName: j.jobName ?? j.name ?? j.jobId ?? j.id ?? ''
+    }))
+  } catch (err) {
+    console.error('[RecommendAutomation] 拉取职位列表失败', err)
   }
 })
 
@@ -180,7 +200,9 @@ const handleSaveAndRun = async () => {
   try {
     await doSave()
     runningOverlayRef.value?.show()
-    const { runRecordId: rrId } = await ipcRenderer.invoke('run-boss-recommend')
+    const { runRecordId: rrId } = await ipcRenderer.invoke('run-boss-recommend', {
+      jobId: selectedJobId.value || null
+    })
     runRecordId.value = rrId
   } catch (err) {
     console.error(err)

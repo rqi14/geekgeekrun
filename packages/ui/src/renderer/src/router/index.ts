@@ -143,15 +143,7 @@ const routes: Array<RouteRecordRaw> = [
         path: 'RecommendAutomation',
         component: () => import('@renderer/page/MainLayout/RecommendAutomation/index.vue'),
         meta: {
-          title: '推荐牛人 · 配置与运行'
-        }
-      },
-      {
-        name: 'BossAutoBrowseAndChat',
-        path: 'BossAutoBrowseAndChat',
-        component: () => import('@renderer/page/MainLayout/BossAutoBrowseAndChat/index.vue'),
-        meta: {
-          title: '推荐牛人 - 自动开聊'
+          title: '推荐牛人'
         }
       },
       {

@@ -752,9 +752,9 @@ export default function initIpc() {
     return result
   })
 
-  ipcMain.handle('run-boss-recommend', async () => {
+  ipcMain.handle('run-boss-recommend', async (_, payload?: { jobId?: string | null }) => {
     const mode = 'bossRecommendMain'
-    const { runRecordId } = await runCommon({ mode })
+    const { runRecordId } = await runCommon({ mode, jobId: payload?.jobId ?? null })
     daemonEE.on('message', function handler(message) {
       if (message.workerId !== mode) {
         return

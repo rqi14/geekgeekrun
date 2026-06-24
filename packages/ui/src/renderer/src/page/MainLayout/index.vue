@@ -136,7 +136,6 @@ const route = useRoute()
 const RECRUITER_ROUTES = [
   'BossJobConfig',
   'RecommendAutomation',
-  'BossAutoBrowseAndChat',
   'BossChatPage',
   'BossAutoSequence',
   'WebhookIntegration',
@@ -180,7 +179,7 @@ function handleIdentityChange(val: string) {
   if (val === 'geek') {
     router.replace('/main-layout/GeekAutoStartChatWithBoss')
   } else {
-    router.replace('/main-layout/BossAutoBrowseAndChat')
+    router.replace('/main-layout/RecommendAutomation')
   }
 }
 
