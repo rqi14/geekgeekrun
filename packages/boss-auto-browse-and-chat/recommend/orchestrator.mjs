@@ -11,6 +11,8 @@ import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
 import { readQuota } from './quota-reader.mjs'
 import { rankForOpen, selectForGreet } from './pure/selection.mjs'
+import { planNativeFilter } from './pure/native-filter.mjs'
+import { applyNativeFilter } from './native-filter-driver.mjs'
 import { BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR } from '../constant.mjs'
 
 /** 连续无法恢复到 LIST 状态的最大次数，超过则中止本次运行（防止卡死空转） */
@@ -43,6 +45,16 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     x: cfg.maxXPerRun
   }
   if (budgets.greet <= 0 && budgets.view <= 0) return
+
+  // Layer-0 服务端预筛（操作基座）：设一次原生筛选面板，改变"推谁"。enabled=false→plan 空→no-op。
+  if (cfg.nativeFilter?.enabled) {
+    const plan = planNativeFilter(cfg.nativeFilter)
+    const report = await applyNativeFilter(page, getFrame(), cursor, plan).catch(() => null)
+    if (report?.listEmptyAfterApply) {
+      console.warn('[recommend] 原生筛选后列表为空，本轮无人可处理')
+      return
+    }
+  }
 
   // 状态守卫：返回 'list' | 'break' | 'retry'
   let stuckHeals = 0

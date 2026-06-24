@@ -418,6 +418,7 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     const recCfg = {
       ...(recommendPageOpts || {}),
       rules: filterConfig,
+      nativeFilter: filterConfig.nativeFilter,
       waveSize: recommendPageOpts.waveSize ?? 6,
       maxGreetPerRun: recommendPageOpts.maxGreetPerRun ?? maxChatPerRun,
       maxViewPerRun: recommendPageOpts.maxViewPerRun ?? 20,
