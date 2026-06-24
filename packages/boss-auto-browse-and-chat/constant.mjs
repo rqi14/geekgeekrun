@@ -29,6 +29,9 @@ export const CANDIDATE_DETAIL_SELECTOR = ''
 /** 5. 打招呼按钮（在单条 item 的 div.operate-side 内） */
 export const CHAT_START_BUTTON_SELECTOR = 'button.btn-greet'
 
+/** 列表卡内的打招呼按钮（在 li.card-item 作用域内查询，不开简历直接招呼） */
+export const CARD_GREET_BTN_SELECTOR = 'button.btn-greet'
+
 /** "已向牛人发送招呼"弹窗内的"知道了"按钮（弹窗在主页面，不在 iframe 内） */
 export const GREETING_SENT_KNOW_BTN_SELECTOR = 'div.dialog-wrap button.btn-sure-v2'
 

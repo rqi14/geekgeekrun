@@ -1,9 +1,11 @@
 import { sleep, sleepWithRandomDelay } from '@geekgeekrun/utils/sleep.mjs'
 import { classifyRejectReason } from './pure/reject-reason-classifier.mjs'
-import { waitForState, STATES } from './page-state.mjs'
+import { waitForState, detectState, STATES } from './page-state.mjs'
 import {
   NOT_INTERESTED_REASON_ITEMS_SELECTOR,
-  NOT_INTERESTED_REASON_SUBMIT_SELECTOR
+  NOT_INTERESTED_REASON_SUBMIT_SELECTOR,
+  CARD_GREET_BTN_SELECTOR,
+  GREETING_SENT_KNOW_BTN_SELECTOR
 } from '../constant.mjs'
 
 /**
@@ -71,6 +73,58 @@ export async function scrollGently (page, cfg) {
     await sleep(120 + Math.floor(120 * Math.random()))
   }
   await sleepWithRandomDelay(lo, hi)
+}
+
+/** 把已在 DOM 的目标卡滚进视口中部（列表不虚拟化，卡始终可查询）。返回是否找到。 */
+export async function scrollCardIntoView (frame, encryptGeekId) {
+  if (!frame) return false
+  const ok = await frame
+    .evaluate((id) => {
+      const inner = document.querySelector(`div.card-inner[data-geek="${id}"]`)
+      if (!inner) return false
+      inner.scrollIntoView({ block: 'center', inline: 'nearest' })
+      return true
+    }, encryptGeekId)
+    .catch(() => false)
+  if (ok) await sleep(400)
+  return ok
+}
+
+/**
+ * 在列表卡上直接点"打招呼"（不开简历）。
+ * 返回 { greeted, quotaBlocked }：撞 business-block 时 greeted=false, quotaBlocked=true。
+ * @param {import('puppeteer').Page} page
+ * @param {import('puppeteer').Frame} frame
+ * @param {object} cursor
+ * @param {string} encryptGeekId
+ */
+export async function greetFromCard (page, frame, cursor, encryptGeekId) {
+  const handle = await frame.evaluateHandle(
+    (id, sel) => {
+      const inner = document.querySelector(`div.card-inner[data-geek="${id}"]`)
+      if (!inner) return null
+      const li = inner.closest('li.card-item')
+      return li ? li.querySelector(sel) : null
+    },
+    encryptGeekId,
+    CARD_GREET_BTN_SELECTOR
+  )
+  const btn = handle.asElement()
+  if (!btn) return { greeted: false, quotaBlocked: false }
+  await cursor.click(btn).catch(async () => {
+    await btn.click().catch(() => {})
+  })
+  await sleep(800)
+  if ((await detectState(page, frame)) === STATES.QUOTA_BLOCKED) {
+    return { greeted: false, quotaBlocked: true }
+  }
+  const know = await page.$(GREETING_SENT_KNOW_BTN_SELECTOR).catch(() => null)
+  if (know) {
+    await cursor.click(know).catch(async () => {
+      await know.click().catch(() => {})
+    })
+  }
+  return { greeted: true, quotaBlocked: false }
 }
 
 // LIVE-SMOKE PENDING: in dev browser, call rejectFromList on one candidate (confirm card disappears,
