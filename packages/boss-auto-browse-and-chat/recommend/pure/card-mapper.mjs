@@ -1,5 +1,11 @@
 const DEGREE_RE = /本科|硕士|博士|大专|专科|MBA|中专|高中|初中/
 
+/** expect 数组形如 [城市, 方向...]；方向 = 去掉第一个(城市)后拼接。空安全。 */
+function deriveExpectDirection (expect) {
+  const arr = Array.isArray(expect) ? expect.filter(Boolean) : []
+  return arr.length > 1 ? arr.slice(1).join(' ') : ''
+}
+
 /**
  * 归一化 list-scraper 抽出的 raw 卡片为筛选/评分用的候选对象。纯函数。
  */
@@ -18,6 +24,9 @@ export function mapRawCard (raw) {
     education: baseInfo.find((s) => DEGREE_RE.test(s)) ?? null,
     city: expect[0] ?? null,
     jobTitle: expect[1] ?? null,
+    expect,
+    expectLabel: raw.expectLabel || '',
+    expectDirection: deriveExpectDirection(expect),
     skills: raw.advantage ?? '',
     tags: Array.isArray(raw.tags) ? raw.tags : [],
     eduExps,

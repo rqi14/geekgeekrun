@@ -60,3 +60,12 @@ test('isPrimaryCard false when no encryptGeekId', () => {
 test('isPrimaryCard true for a normal card', () => {
   assert.equal(isPrimaryCard(raw), true)
 })
+test('expectLabel and expectDirection: 期望 + city+direction', () => {
+  const c = mapRawCard({ ...raw, expectLabel: '期望', expect: ['杭州', '化工'] })
+  assert.equal(c.expectLabel, '期望')
+  assert.equal(c.expectDirection, '化工')
+})
+test('expectDirection is empty when only city in expect', () => {
+  const c = mapRawCard({ ...raw, expectLabel: '最近关注', expect: ['杭州'] })
+  assert.equal(c.expectDirection, '')
+})

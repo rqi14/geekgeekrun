@@ -38,6 +38,7 @@ function extractRawCardsInFrame () {
       activeText: inner ? txt(inner, 'span.active-text') : '',
       baseInfo: inner ? txts(inner, 'div.base-info span') : [],
       expect: inner ? txts(inner, 'div.expect-wrap span.content div.join-text-wrap span') : [],
+      expectLabel: inner ? txt(inner, 'div.expect-wrap span.label') : '',
       advantage: inner ? txt(inner, 'div.geek-desc span.content') : '',
       tags: inner ? txts(inner, 'div.tags-wrap span.tag-item') : [],
       eduExps: inner
