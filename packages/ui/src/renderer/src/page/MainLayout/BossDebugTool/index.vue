@@ -324,6 +324,15 @@
               <el-tag v-if="recoState" type="info">状态：{{ recoState }}</el-tag>
               <el-tag v-if="recoQuota" type="warning">配额：{{ recoQuota }}</el-tag>
               <el-checkbox v-model="recoOnlyViewed">仅看已看过（不烧额度）</el-checkbox>
+              <el-select
+                v-model="recoDryRunJobId"
+                placeholder="职位(用其 rubric 评分,留空=规则only)"
+                clearable
+                size="small"
+                style="width: 220px"
+              >
+                <el-option v-for="j in allJobs" :key="j.jobId" :label="j.jobName" :value="j.jobId" />
+              </el-select>
               <el-button
                 type="warning"
                 plain
@@ -768,6 +777,14 @@ const recoDryRun = async () => {
     }
     recoSummary.value = ''
     return
+  }
+  if (r.scoringMode === 'rule-only') {
+    addLog(
+      `⚠ 评分模式=规则only（未配 rubric）→ 所有人 score=阈值${r.minScoreToChat ?? 0}、理由为空、人人入选。要测 LLM 评分请在上方选一个配了 rubric 的职位。`,
+      'err'
+    )
+  } else {
+    addLog('评分模式=LLM rubric ✓', 'ok')
   }
   addLog(
     `收集池 ${r.pool} ｜ 开简历 ${r.opened} ｜ 打分 ${r.scored?.length ?? 0} ｜ 拟打招呼 ${r.wouldGreet?.length ?? 0}`,

@@ -188,6 +188,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     return {
       dryRun: true,
       onlyViewed: !!cfg.onlyViewed,
+      scoringMode: cfg.llm?.rubric ? 'llm-rubric' : 'rule-only',
+      minScoreToChat: cfg.minScoreToChat,
       passedRule,
       pool: pool.size,
       opened,
