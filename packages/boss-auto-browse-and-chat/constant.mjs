@@ -147,6 +147,13 @@ export const CHAT_PAGE_JOB_DROPDOWN_SELECTOR = '.dropmenu-label.chat-select-job'
 /** 沟通页：职位下拉展开后的列表项（过滤 value="-1" 的"全部职位"） */
 export const CHAT_PAGE_JOB_ITEM_SELECTOR = '.chat-top-job .ui-dropmenu-list li'
 
+/** 顶部导航"账号权益"入口（ka 埋点 key 稳，文案兜底） */
+export const ACCOUNT_RIGHTS_NAV_SELECTOR = '[ka="header_nav_rights"]'
+/** 账号权益侧栏内的 iframe（路径稳，class 哈希不稳） */
+export const PRIVILEGE_IFRAME_SELECTOR = 'iframe[src*="/mpa/v3/html/vip/privilege"]'
+/** 账号权益侧栏关闭按钮 */
+export const PRIVILEGE_PANEL_CLOSE_SELECTOR = '.iframe-box-wrap .iframe-close, .iframe-box-content .iframe-close'
+
 // =============================================================================
 // 二、沟通页（/web/chat/index）— 会话列表、要简历、预览附件、下载 PDF
 // =============================================================================
