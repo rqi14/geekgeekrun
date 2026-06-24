@@ -22,7 +22,7 @@ import { preflightGhostCursor, randomizeInitialCursorPosition } from './humanMou
 import { buildRecruiterLaunchOptions } from './launch-options.mjs'
 import { checkpointRiskControl } from './risk-detector.mjs'
 import { runRecommendLoop } from './recommend/orchestrator.mjs'
-import { generateRubricFromJd } from './llm-rubric.mjs'
+import { buildRecommendCfgAndLlm } from './recommend/run-config.mjs'
 
 export { default as startBossChatPageProcess } from './chat-page-processor.mjs'
 
@@ -415,47 +415,13 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     // 推荐页波次循环（recommend/orchestrator）：列表初筛 → 开简历评分 → 弹窗内打招呼 → 策略性 X
     // 取代旧的 解析→筛选→滚动 主循环；不再无界滚动（账号安全）。
     // -----------------------------------------------------------------------
-    const recCfg = {
-      ...(recommendPageOpts || {}),
-      rules: filterConfig,
-      nativeFilter: filterConfig.nativeFilter,
-      waveSize: recommendPageOpts.waveSize ?? 6,
-      maxGreetPerRun: recommendPageOpts.maxGreetPerRun ?? maxChatPerRun,
-      maxViewPerRun: recommendPageOpts.maxViewPerRun ?? 20,
-      maxXPerRun: recommendPageOpts.maxXPerRun ?? 10,
-      maxScrollSteps: recommendPageOpts.maxScrollSteps ?? 6,
-      maxStaleWaves: recommendPageOpts.maxStaleWaves ?? 2,
-      scrollDelayMsRange: recommendPageOpts.scrollDelayMsRange ?? [800, 2000],
-      delayBetweenActionsMs: recommendPageOpts.delayBetweenActionsMs ?? [1500, 4000],
-      minScoreToChat: config?.scoring?.minScoreToChat ?? 0,
-      onScoreError: config?.scoring?.onScoreError ?? 'skip',
-      canvasHook,
-      llm: {}
-    }
-
-    // 评分：启用且能拿到 rubric 时用 LLM（每次运行只生成一次 rubric）；否则规则-only（过初筛即按阈值打招呼）
-    const scoringCfg = config?.scoring || {}
-    let recLlmFn
-    if (scoringCfg.enabled) {
-      let rubric = scoringCfg.rubric || null
-      if (!rubric && scoringCfg.jd) {
-        try {
-          rubric = (await generateRubricFromJd(scoringCfg.jd, { modelId: scoringCfg.modelId ?? null })).rubric
-        } catch (e) {
-          logWarn('[boss-auto-browse] 生成评分 rubric 失败，回退规则-only:', e?.message)
-          rubric = null
-        }
-      }
-      if (rubric) {
-        recCfg.llm = { rubric, modelId: scoringCfg.modelId ?? null }
-        recLlmFn = undefined
-      } else {
-        logWarn('[boss-auto-browse] 评分已启用但无 rubric/JD，回退规则-only')
-        recLlmFn = async () => ({ score: recCfg.minScoreToChat })
-      }
-    } else {
-      recLlmFn = async () => ({ score: recCfg.minScoreToChat })
-    }
+    const { recCfg, recLlmFn } = await buildRecommendCfgAndLlm({
+      config,
+      recommendPageOpts,
+      filterConfig,
+      maxChatPerRun
+    })
+    recCfg.canvasHook = canvasHook
 
     await hooks.onCandidateListLoaded?.promise?.()
     await runRecommendLoop(page, getRecommendFrame, hooks, recCfg, recLlmFn)

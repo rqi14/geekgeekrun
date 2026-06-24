@@ -33,7 +33,8 @@ async function closeBusinessBlock (page) {
  * @param {object} cfg - recommendPage + scoring + rules 合并配置
  *   cfg.maxGreetPerRun, cfg.maxViewPerRun, cfg.maxXPerRun, cfg.maxStaleWaves,
  *   cfg.waveSize, cfg.minScoreToChat, cfg.onScoreError, cfg.rules, cfg.llm,
- *   cfg.delayBetweenActionsMs, cfg.scrollDelayMsRange
+ *   cfg.delayBetweenActionsMs, cfg.scrollDelayMsRange,
+ *   cfg.dryRun, cfg.onlyViewed, cfg.dryRunMaxOpen
  * @param {(payload:object)=>Promise<{score:number,reason?:string}>} [llmFn]
  */
 export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
@@ -99,11 +100,12 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       if (pre.result === 'reject') {
         if (hooks?.onCandidateFiltered)
           await hooks.onCandidateFiltered.promise([c], { matched: false, reason: pre.reason }).catch(() => {})
-        if (budgets.x > 0 && shouldClickX(cfg) && c.interactable) {
+        if (!cfg.dryRun && budgets.x > 0 && shouldClickX(cfg) && c.interactable) {
           if (await rejectFromList(page, frame, cursor, c.encryptGeekId, pre.reason, c)) budgets.x--
         }
         continue
       }
+      if (cfg.onlyViewed && !c._hasViewed) continue
       pool.set(c.encryptGeekId, c)
     }
     staleScrolls = pool.size === before ? staleScrolls + 1 : 0
@@ -115,8 +117,13 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
 
   // ---------- B 相：开简历 + 打分（烧查看额度） ----------
   const scored = []
+  let opened = 0
   for (const c of openSet) {
-    if (budgets.view <= 0) break
+    if (cfg.dryRun) {
+      if (opened >= (cfg.dryRunMaxOpen ?? 8)) break
+    } else if (budgets.view <= 0) {
+      break
+    }
     const frame = getFrame()
     const g = await guard(frame)
     if (g === 'break') break
@@ -130,7 +137,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       }
       continue
     }
-    budgets.view--
+    opened++
+    if (!cfg.dryRun) budgets.view--
     if (!await assertIdentity(frame, c.geekName)) {
       await closeResume(page, frame, cursor)
       continue
@@ -139,9 +147,15 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     const fullText = await captureResumeText(page, cfg.canvasHook)
     const resume = { summary: summaryObj.summary, fullText: fullText || summaryObj.summary }
     const s = await score(c, resume, cfg, llmFn)
-    scored.push({ candidate: c, score: s.score, hardReject: s.hardReject, reason: s.reason })
+    scored.push({
+      candidate: c,
+      score: s.score,
+      hardReject: s.hardReject,
+      reason: s.reason,
+      resumeChars: (resume.fullText || '').length
+    })
     await closeResume(page, frame, cursor)
-    if (s.hardReject && budgets.x > 0 && shouldClickX(cfg)) {
+    if (!cfg.dryRun && s.hardReject && budgets.x > 0 && shouldClickX(cfg)) {
       if (await rejectFromList(page, frame, cursor, c.encryptGeekId, s.reason, c)) budgets.x--
     }
     await sleepWithRandomDelay(
@@ -151,7 +165,29 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   }
 
   // ---------- C 相：选最好 + 打招呼（烧沟通额度） ----------
-  const greetSet = selectForGreet(scored, { minScore: cfg.minScoreToChat, greetBudget: budgets.greet })
+  const greetSet = selectForGreet(scored, {
+    minScore: cfg.minScoreToChat,
+    greetBudget: cfg.dryRun ? scored.length : budgets.greet
+  })
+  if (cfg.dryRun) {
+    return {
+      dryRun: true,
+      onlyViewed: !!cfg.onlyViewed,
+      pool: pool.size,
+      opened,
+      scored: scored.map((s) => ({
+        geekName: s.candidate.geekName,
+        prescore: cheapPrescore(s.candidate),
+        score: s.score,
+        hardReject: s.hardReject,
+        reason: s.reason,
+        resumeChars: s.resumeChars ?? 0,
+        hasViewed: !!s.candidate._hasViewed
+      })),
+      wouldGreet: greetSet.map((g) => ({ geekName: g.candidate.geekName, score: g.score })),
+      budgets
+    }
+  }
   let greeted = 0
   for (const item of greetSet) {
     if (budgets.greet <= 0) break
