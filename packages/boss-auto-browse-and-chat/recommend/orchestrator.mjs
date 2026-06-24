@@ -13,7 +13,10 @@ import { readQuota } from './quota-reader.mjs'
 import { rankForOpen, selectForGreet } from './pure/selection.mjs'
 import { planNativeFilter } from './pure/native-filter.mjs'
 import { applyNativeFilter } from './native-filter-driver.mjs'
-import { BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR } from '../constant.mjs'
+import { BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR, BOSS_RECOMMEND_PAGE_URL } from '../constant.mjs'
+
+/** 推荐页 URL 关键字（被跳走到 user-center 等页面时用于识别"已离开推荐页"） */
+const RECOMMEND_URL_KEYWORD = '/web/chat/recommend'
 
 /** 连续无法恢复到 LIST 状态的最大次数，超过则中止本次运行（防止卡死空转） */
 const MAX_STUCK_HEALS = 5
@@ -60,6 +63,16 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   // 状态守卫：返回 'list' | 'break' | 'retry'
   let stuckHeals = 0
   async function guard (frame) {
+    // URL 守卫：被跳走（如 /web/chat/user-center）→ 导航回推荐页，绝不在错页上继续操作
+    if (!page.url().includes(RECOMMEND_URL_KEYWORD)) {
+      if (++stuckHeals > MAX_STUCK_HEALS) return 'break'
+      console.warn('[recommend] 已离开推荐页（当前 URL：' + page.url() + '），导航回推荐页')
+      await page.goto(BOSS_RECOMMEND_PAGE_URL, { timeout: 60000 }).catch(() => {})
+      await page
+        .waitForFunction(() => document.readyState === 'complete', { timeout: 60000 })
+        .catch(() => {})
+      return 'retry'
+    }
     const st = await detectState(page, frame)
     if (st === STATES.ACCOUNT_BANNED)
       throw new Error('ACCOUNT_BANNED: recommend loop aborted for account safety')
@@ -84,6 +97,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   // ---------- A 相：收集 + 免费规则初筛 + 排序 ----------
   const pool = new Map()
   const seen = new Set()
+  let passedRule = 0 // 过了规则初筛的人数（onlyViewed 过滤之前），用于 dry-run 解释"为什么 pool=0"
   const target = Math.max((budgets.view || 0) * 2, cfg.waveSize)
   let staleScrolls = 0
   while (pool.size < target && budgets.view > 0) {
@@ -105,6 +119,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         }
         continue
       }
+      passedRule++
       if (cfg.onlyViewed && !c._hasViewed) continue
       pool.set(c.encryptGeekId, c)
     }
@@ -173,6 +188,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     return {
       dryRun: true,
       onlyViewed: !!cfg.onlyViewed,
+      passedRule,
       pool: pool.size,
       opened,
       scored: scored.map((s) => ({

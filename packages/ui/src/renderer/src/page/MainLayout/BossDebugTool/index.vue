@@ -755,6 +755,20 @@ const recoDryRun = async () => {
   })
   const r = res?.ok && res.result?.report
   if (!r) return
+  if (r.pool === 0) {
+    if (r.onlyViewed && (r.passedRule ?? 0) > 0) {
+      addLog(
+        `⚠ 本批 ${r.passedRule} 人过了规则筛但都没看过 → 勾了「仅看已看过」所以池为空。取消勾选用额度测，或先在列表「打开简历」几个再测。`,
+        'err'
+      )
+    } else if ((r.passedRule ?? 0) === 0) {
+      addLog('⚠ 没有候选人通过规则初筛（或列表为空/未登录/未停在推荐页）。', 'err')
+    } else {
+      addLog('⚠ 收集池为空。', 'err')
+    }
+    recoSummary.value = ''
+    return
+  }
   addLog(
     `收集池 ${r.pool} ｜ 开简历 ${r.opened} ｜ 打分 ${r.scored?.length ?? 0} ｜ 拟打招呼 ${r.wouldGreet?.length ?? 0}`,
     'ok'

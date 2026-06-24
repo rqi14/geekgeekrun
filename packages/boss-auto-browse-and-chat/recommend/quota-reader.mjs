@@ -160,7 +160,29 @@ export async function diagnoseQuota (page) {
 }
 
 async function closePanel (page) {
+  // 实测：权益侧栏不关会挡住后续所有操作。优先点 privilege iframe 内 b-business-nav-bar 左侧关闭图标，
+  // 再兜底外层 .iframe-close，最后 Esc。三重保证关干净。
+  try {
+    const el = await page.$(PRIVILEGE_IFRAME_SELECTOR).catch(() => null)
+    const frame = el ? await el.contentFrame().catch(() => null) : null
+    if (frame) {
+      const clicked = await frame
+        .evaluate(() => {
+          const icon = document.querySelector('.b-business-nav-bar__left-wrap i')
+          if (icon) {
+            icon.click()
+            return true
+          }
+          return false
+        })
+        .catch(() => false)
+      if (clicked) await sleep(400)
+    }
+  } catch {
+    // ignore，走兜底
+  }
   const btn = await page.$(PRIVILEGE_PANEL_CLOSE_SELECTOR).catch(() => null)
   if (btn) await btn.click().catch(() => {})
+  await page.keyboard.press('Escape').catch(() => {})
   await sleep(400)
 }
