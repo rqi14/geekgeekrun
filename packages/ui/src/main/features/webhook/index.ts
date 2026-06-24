@@ -143,7 +143,7 @@ function appendToQueueFile(payload: WebhookPayload, storageDir: string): void {
 }
 
 async function doOneRequest(
-  config: WebhookConfig,
+  _config: WebhookConfig,
   method: string,
   url: string,
   headers: Record<string, string>,

@@ -109,7 +109,7 @@ import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-
 const { ipcRenderer } = electron
 
 const isSaving = ref(false)
-const runRecordId = ref<number | null>(null)
+const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 

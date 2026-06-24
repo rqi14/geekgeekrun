@@ -13,16 +13,15 @@ export async function runCommon({ mode, jobId }: { mode: string; jobId?: string 
       needCallback: true
     }
   )
-  const taskList = (
-    await sendToDaemon(
-      {
-        type: 'get-status'
-      },
-      {
-        needCallback: true
-      }
-    )
-  )?.workers
+  const statusResult = (await sendToDaemon(
+    {
+      type: 'get-status'
+    },
+    {
+      needCallback: true
+    }
+  )) as { workers?: Array<{ workerId: string; args?: string[] }> } | undefined
+  const taskList = statusResult?.workers
   const runningTask = taskList?.find((it) => it.workerId === mode)
   if (runningTask) {
     const commandlineArgs = minimist(runningTask.args ?? [])
@@ -33,7 +32,8 @@ export async function runCommon({ mode, jobId }: { mode: string; jobId?: string 
       isAlreadyRunning: true
     }
   }
-  const currentRunRecord = (await saveAndGetCurrentRunRecord())?.data
+  const currentRunRecord = ((await saveAndGetCurrentRunRecord()) as { data?: { id?: number } })
+    ?.data
   const subProcessEnv = {
     ...process.env,
     GEEKGEEKRUND_NO_AUTO_RESTART_EXIT_CODE: [

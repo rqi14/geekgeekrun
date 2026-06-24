@@ -1,7 +1,7 @@
 <template>
   <div class="boss-chat-page__wrap">
     <div class="main__wrap">
-      <el-form ref="formRef" :model="formContent" label-position="top">
+      <el-form :model="formContent" label-position="top">
         <el-card class="config-section">
           <template #header>
             <span>职位沟通队列</span>
@@ -138,9 +138,8 @@ import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-
 
 const { ipcRenderer } = electron
 
-const formRef = ref()
 const isSaving = ref(false)
-const runRecordId = ref<number | null>(null)
+const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 

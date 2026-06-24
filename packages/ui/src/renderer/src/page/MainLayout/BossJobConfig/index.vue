@@ -438,29 +438,6 @@ function defaultResumeLlmConfig(): ResumeLlmConfig {
   }
 }
 
-function defaultFilter(): JobFilter {
-  return {
-    expectCityEnabled: false,
-    expectCityListStr: '',
-    expectEducationEnabled: false,
-    expectEducationRegExpStr: '',
-    expectWorkExpMinEnabled: false,
-    expectWorkExpMaxEnabled: false,
-    expectWorkExpRange: [0, 99],
-    expectSalaryMinEnabled: false,
-    expectSalaryMaxEnabled: false,
-    expectSalaryRange: [0, 0],
-    expectSalaryWhenNegotiable: 'exclude',
-    resumeKeywordsEnabled: false,
-    resumeKeywordsStr: '',
-    resumeRegExpEnabled: false,
-    resumeRegExpStr: '',
-    resumeLlmEnabled: false,
-    resumeLlmRule: '',
-    resumeLlmConfig: defaultResumeLlmConfig()
-  }
-}
-
 function rawToJobItem(raw: Record<string, any>): JobItem {
   const f = raw.filter ?? {}
   return {
