@@ -14,7 +14,7 @@ import {
   FILTER_OPTION_ACTIVE_CLASS,
   FILTER_BTNS_SELECTOR,
   FILTER_CONFIRM_TEXT,
-  FILTER_LIST_EMPTY_SELECTOR
+  CANDIDATE_ITEM_SELECTOR
 } from '../constant.mjs'
 
 /** driver 自身的硬上限：永远在此 deadline 内返回报告而非挂起。 */
@@ -124,7 +124,8 @@ export async function applyNativeFilter (page, frame, cursor, plan) {
     reason: undefined,
     applied: [],
     skipped: [...((plan && plan.skipped) || [])],
-    listEmptyAfterApply: false
+    listEmptyAfterApply: false,
+    cardCountAfterApply: null
   }
   const apply = (plan && plan.apply) || []
   if (!apply.length) {
@@ -178,22 +179,24 @@ export async function applyNativeFilter (page, frame, cursor, plan) {
 
     await clickBtnByText(ctx, cursor, FILTER_CONFIRM_TEXT)
 
-    // 等列表稳定：LIST 或 零结果空态 任一，带有界超时；绝不死等 LIST。
+    // 等列表稳定并数卡片：不猜"空态选择器"，直接数 ul.card-list 下的卡片。
+    // 有界超时内等卡片出现；0 卡 = 空态。绝不死等。
+    const countCards = async () =>
+      frame ? await frame.$$(CANDIDATE_ITEM_SELECTOR).then((els) => els.length).catch(() => 0) : 0
     const listDeadline = Math.min(deadline, Date.now() + 8000)
+    let cardCount = 0
     while (Date.now() < listDeadline) {
+      cardCount = await countCards()
+      if (cardCount > 0) break
       if ((await detectState(page, frame)) === STATES.LIST) {
-        report.listEmptyAfterApply = false
-        break
-      }
-      const empty = frame
-        ? await frame.$(FILTER_LIST_EMPTY_SELECTOR).then((e) => !!e).catch(() => false)
-        : false
-      if (empty) {
-        report.listEmptyAfterApply = true
+        await sleep(500) // LIST 态但 0 卡：再等一拍确认确实空（而非仍在渲染）
+        cardCount = await countCards()
         break
       }
       await sleep(400)
     }
+    report.cardCountAfterApply = cardCount
+    report.listEmptyAfterApply = cardCount === 0
 
     report.ok = true
     return report

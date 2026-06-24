@@ -115,8 +115,7 @@ export const FILTER_OPTION_ACTIVE_CLASS = 'active'
 export const FILTER_BTNS_SELECTOR = '.filter-panel .btns .btn'
 export const FILTER_CONFIRM_TEXT = '确定'
 export const FILTER_CLEAR_TEXT = '清除'
-/** 筛选后零结果空态屏。唯一无法从面板 HTML 得知者（仅在筛到 0 人后出现）；driver 用有界超时兜底，命中此选择器则标记空态，未命中也不挂死。值待真账号核对。 */
-export const FILTER_LIST_EMPTY_SELECTOR = '.recommend-empty, .empty-wrap, .no-result'
+// 注：筛选后是否零结果，driver 直接数 CANDIDATE_ITEM_SELECTOR 的卡片数判断，不依赖任何"空态屏"选择器。
 
 /** 账号封禁文案（不可恢复 → 中止）。真机需再核对精确字符串。 */
 export const ACCOUNT_BANNED_TEXT_REGEXP = /账号.*不可使用|不可使用状态|登录\s*BOSS直聘手机APP查看详情/
