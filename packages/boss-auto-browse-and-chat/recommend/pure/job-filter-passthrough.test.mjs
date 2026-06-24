@@ -24,3 +24,16 @@ test('defaults are empty when fields absent', () => {
   assert.equal(out.blockCandidateNameRegExpStr, '')
   assert.equal(out.skipViewedCandidates, false)
 })
+test('passes through nativeFilter object', () => {
+  const nf = { enabled: true, degree: ['本科'], salary: '10-20K' }
+  const out = __jobFilterToCandidateFilter({ nativeFilter: nf })
+  assert.deepEqual(out.nativeFilter, nf)
+})
+test('nativeFilter absent → undefined', () => {
+  const out = __jobFilterToCandidateFilter({})
+  assert.equal(out.nativeFilter, undefined)
+})
+test('nativeFilter non-object → undefined', () => {
+  const out = __jobFilterToCandidateFilter({ nativeFilter: 'x' })
+  assert.equal(out.nativeFilter, undefined)
+})

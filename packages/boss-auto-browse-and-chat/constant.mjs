@@ -95,6 +95,31 @@ export const RESUME_SUMMARY_SELECTOR = '.resume-right-side .resume-summary'
 /** 简历弹窗关闭按钮（在 recommendFrame 内的弹窗上，非主页面） */
 export const RESUME_MODAL_CLOSE_SELECTOR = 'div.dialog-wrap.active .dialog-lib-resume .close-btn'
 
+// ===== 推荐页原生「筛选」面板（服务端预筛，主页面 #headerWrap 内；列表在 recommendFrame）=====
+// 选择器均按实测 filter-panel HTML 核定。触发器在主页面（#headerWrap=职位下拉同层，主页面），
+// driver 仍 page→frame 双查以防站点差异。
+/** 筛选按钮（点击展开 .filter-panel）。实测路径：#headerWrap … .recommend-filter.op-filter > div > div */
+export const FILTER_PANEL_TRIGGER_SELECTOR = '.recommend-filter.op-filter > div > div'
+export const FILTER_PANEL_SELECTOR = '.filter-panel'
+/** VIP 高级筛选包裹；含 .vip-mask（锁）与 .vip-folded（折叠展开钮） */
+export const FILTER_VIP_WRAP_SELECTOR = '.filter-panel .vip-filters-wrap'
+export const FILTER_VIP_FOLDED_SELECTOR = '.filter-panel .vip-filters-wrap .vip-folded'
+export const FILTER_VIP_MASK_SELECTOR = '.filter-panel .vip-filters-wrap .vip-mask'
+/** 折叠态标记：.vip-filters-wrap 含此 class 表示当前折叠（需点 vip-folded 展开）。实测 HTML：class="vip-filters-wrap show-folded" */
+export const FILTER_VIP_FOLDED_STATE_CLASS = 'show-folded'
+/** 某维度的选项组容器；用法：`${FILTER_PANEL_SELECTOR} .check-box.${groupClass}` */
+export const filterGroupSelector = (groupClass) => `${FILTER_PANEL_SELECTOR} .check-box.${groupClass}`
+/** 组内单个选项（.default.option 是「不限」复位项）；major 的 .option 嵌在 .popover 里，故用后代匹配 */
+export const FILTER_OPTION_SELECTOR = '.option'
+export const FILTER_OPTION_DEFAULT_SELECTOR = '.default.option'
+/** 选项选中态 class。实测 HTML：选中项为 class="... option active" */
+export const FILTER_OPTION_ACTIVE_CLASS = 'active'
+/** 底部按钮：优先按文案匹配，class 仅回退。实测 HTML：确定 <div class="btn">、清除 <div class="btn btn-outline default"> */
+export const FILTER_BTNS_SELECTOR = '.filter-panel .btns .btn'
+export const FILTER_CONFIRM_TEXT = '确定'
+export const FILTER_CLEAR_TEXT = '清除'
+// 注：筛选后是否零结果，driver 直接数 CANDIDATE_ITEM_SELECTOR 的卡片数判断，不依赖任何"空态屏"选择器。
+
 /** 账号封禁文案（不可恢复 → 中止）。真机需再核对精确字符串。 */
 export const ACCOUNT_BANNED_TEXT_REGEXP = /账号.*不可使用|不可使用状态|登录\s*BOSS直聘手机APP查看详情/
 /** 今日额度用尽文案 */

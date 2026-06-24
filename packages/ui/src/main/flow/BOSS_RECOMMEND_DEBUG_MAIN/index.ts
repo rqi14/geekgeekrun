@@ -79,6 +79,12 @@ const runDebug = async () => {
   const { setDomainLocalStorage } = (await import(
     '@geekgeekrun/utils/puppeteer/local-storage.mjs'
   )) as any
+  const { planNativeFilter } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/pure/native-filter.mjs'
+  )) as any
+  const { applyNativeFilter } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/recommend/native-filter-driver.mjs'
+  )) as any
 
   const { puppeteer } = await initPuppeteer()
   ensureStorageFileExist()
@@ -392,6 +398,54 @@ const runDebug = async () => {
             if (c) c.click()
           }).catch(() => {})
           reply(true, diag)
+          break
+        }
+
+        case 'apply-native-filter': {
+          if (!frame) {
+            reply(true, { ok: false, reason: 'no-frame', applied: [], skipped: [], listEmptyAfterApply: false })
+            break
+          }
+          const nativeFilter = cmd.nativeFilter ?? {}
+          const plan = planNativeFilter(nativeFilter)
+          const report = await applyNativeFilter(page, frame, cursor, plan)
+          // 业务级 report.ok:false 仍用协议成功回传整份报告（协议 false 只给 worker 异常）
+          reply(true, { plan, report })
+          break
+        }
+
+        case 'diagnose-filter': {
+          // dump 面板结构：触发器在哪、各组 class、选项文案、单选多选迹象、VIP 锁、确定/清除按钮
+          const ctx: any = (await page.$('.recommend-filter.op-filter')) ? page : frame
+          if (!ctx) {
+            reply(true, { triggerCtx: 'none' })
+            break
+          }
+          const trig = await ctx.$('.recommend-filter.op-filter').catch(() => null)
+          if (trig) {
+            await trig.click().catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          const dump = await ctx.evaluate(() => {
+            const panel = document.querySelector('.filter-panel')
+            if (!panel) return { panelOpen: false }
+            const groups = Array.from(panel.querySelectorAll('.check-box')).map((g: any) => ({
+              cls: typeof g.className === 'string' ? g.className : '',
+              options: Array.from(g.querySelectorAll('.option')).map((o: any) => ({
+                text: (o.textContent || '').replace(/\s+/g, ''),
+                isDefault: o.classList.contains('default'),
+                active: o.classList.contains('active')
+              }))
+            }))
+            const vipMask = !!panel.querySelector('.vip-filters-wrap .vip-mask')
+            const folded = !!panel.querySelector('.vip-filters-wrap.show-folded')
+            const btns = Array.from(panel.querySelectorAll('.btns .btn')).map((b: any) => ({
+              cls: typeof b.className === 'string' ? b.className : '',
+              text: (b.textContent || '').trim()
+            }))
+            return { panelOpen: true, vipMask, folded, groups, btns }
+          })
+          reply(true, dump)
           break
         }
 
