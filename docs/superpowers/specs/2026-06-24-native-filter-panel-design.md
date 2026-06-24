@@ -18,9 +18,10 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 本 spec 只交付一个**通用、无状态、无意见的能力层（底座）**：
 
 - 一个纯函数 planner + 静态 catalog
-- 一个 impure driver：`applyNativeFilter(target, cursor, plan)` —— 打开面板、按计划点选项、点确定、等列表稳定，返回「实际生效/被跳过」报告
+- 一个 impure driver：`applyNativeFilter(page, frame, cursor, plan)` —— 打开面板、按计划点选项、点确定、等列表稳定，返回带 `ok/reason` 的「实际生效/被跳过」报告
 - `constant.mjs` 选择器
 - `candidate-filter.json` 的 `nativeFilter` 配置 schema + per-job 透传
+- 两个一次性调试命令（`apply-native-filter` / `diagnose-filter`）用于单步真账号验证
 
 **明确不在本 spec 内（由后续另一个 agent 决定）：**
 
@@ -78,7 +79,7 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
   - `options` 为面板精确文案数组（如 degree：`['初中及以下','中专/中技','高中','大专','本科','硕士','博士']`）。
 - `normalizeOption(s)`（**Opus review 必改点**）：纯层导出**唯一**的文案归一函数，driver 必须 import 复用。BOSS 面板 DOM 的选项文本带前后空白与换行（实测样本 `"\n    本科\n"`）。定一套规则：`String(s ?? '').replace(/\s+/g, '')`（去掉全部空白，含中间换行）。**纯层校验「配置值 ↔ catalog」与 driver 读 DOM `.option` 文本必须用同一个 `normalizeOption`**，否则合法选项会被一边 trim、另一边精确匹配而静默落进 `skipped`。
 - `planNativeFilter(nativeFilterCfg, catalog = NATIVE_FILTER_CATALOG)` → `{ apply: [{ group, single, options: string[] }], skipped: [{ group, value, reason }] }`
-  - 纯函数、**VIP 无关**：把配置取值经 `normalizeOption` 归一后对着 catalog 校验。`apply[].options` 存**原始 catalog 文案**（供 driver 与归一后的 DOM 文本比对）。
+  - 纯函数、**VIP 无关**：把配置取值经 `normalizeOption` 归一后对着 catalog 校验。`apply[].options` **统一存原始 catalog 文案**（单一约定，不存归一值）；driver 在**比对时**对两边各 `normalizeOption` 一次。下文 driver 步骤里的"归一后目标文案"即指此运行期比对，不改变 plan 的存储约定。
   - 不合法文案 → 进 `skipped`（`reason:'unknown-option'`），不抛错。
   - 空值/`enabled:false` → 该维度不进 `apply`。
   - 单选维度给了数组只取第一个；多选维度给了字符串当单元素数组。
@@ -97,22 +98,25 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 2. **折叠区幂等展开**：仅当 `plan.apply` 含 VIP 维度时处理；先**读当前展开/折叠状态**（`vip-filters-wrap` 是否带 `show-folded` / `vip-folded` 是否可见），**只有在折叠时才点** `vip-folded`。绝不无条件点（会把已展开的面板又收起来）。
 3. **运行期 VIP 门禁**：检测 `.vip-mask`（或 VIP 组不可点）。VIP 不可用 → VIP 维度整体跳过并记入 `skipped`（`reason:'vip-locked'`）。这是「有时有 VIP」的降级路径。
 4. **清空再选（幂等）**：对每个要应用的维度，先点该组的「不限」复位项（`.default.option`）清掉历史选择，再开始勾。保证「按 plan 操作一次」与面板已有状态/调用顺序无关（尤其单选维度避免旧值残留）。
-5. 对每个维度：定位 `.check-box.<groupClass>` → 遍历组内 `.option`，用 `normalizeOption(el.innerText)` 与 `plan` 里归一后的目标文案比对点击（单选点一个；多选逐个点）。
-6. **点完即验证（report 诚实性，Opus review 必改点）**：每点一项，**回读该 `.option` 是否真的进入选中态**（如获得 `active` class）。**只有观测到选中才记入 `applied`；点了没生效（VIP present-but-inert / 站点变更）记入 `skipped`（`reason:'click-no-effect'`）。** 报告反映「实际观测到的选中态」，不是「尝试点了几下」—— 这层东西的全部价值就是如实汇报筛没筛。
+5. 对每个维度：定位 `.check-box.<groupClass>` → 遍历组内 `.option`（注意 `major` 等组的 `.option` 可能**嵌在 `.popover.filter-tooltip` 包裹里**，用后代选择器匹配，不假设是直接子节点），`normalizeOption(el.innerText)` 与目标 `normalizeOption(catalog文案)` 相等则点（单选点一个；多选逐个点）。
+6. **整组回读验证（report 诚实性，Codex 查漏修正）**：**不做"每点一次记一次"**，而是该组全部点完后**回读整组当前选中态**（带 `active` class 的 `.option` 集合），令该组 `applied = 目标 ∩ 实际选中`，目标里没出现在实际选中的进 `skipped`（`reason:'click-no-effect'`）。这样**天然兼容单选组自动反选**（避免把"点过但被后一次顶掉"的项误记成 applied），也覆盖 VIP present-but-inert。报告反映「实际观测到的选中态」，不是「点了几下」。
+   > 各维度单选/多选以 catalog 的 `single` 为准（`[单选]`：活跃度/跳槽频率/薪资）；**但 `single` 实际值必须用 `diagnose-filter` 对真站点逐组核对后再定稿**——若某看似多选的组（如经验）实为单选,整组回读法不会误报，但 catalog 的 `single` 仍应改对以便清空逻辑正确。
 7. 点 **确定**：**按文案 `确定` 正向定位**（与选项同一套精确匹配），class 排除（非 `.default`/`.btn-outline`）仅作回退。避免站点新增按钮时"排除法"点错。
-8. 等列表在 **`frame`** 上回到 `LIST` 稳定状态（复用 `page-state` 的 `detectState`/`waitForState`）。
+8. 等列表在 **`frame`** 上稳定。**确定后列表可能为两种合法终态**（Codex 查漏新增）：(a) `LIST`（`ul.card-list` 存在）；(b) **筛选后零结果的空态屏**（不同于 `LIST`，`page-state` 不会返回 `LIST`）。driver 须 `Promise.race`/轮询**等"LIST 或 空态选择器"任一出现**，带自身有界超时；命中空态则报告标记（如 `listEmptyAfterApply:true`），**绝不死等 `LIST` 而挂起**。空态选择器在实现时用 `diagnose-filter` 核对。
 9. 返回报告（见下）。
 
 **报告形状（Opus review 必改点）**：
 ```js
 {
   ok: true | false,                 // 面板是否成功打开并走完流程
-  reason: undefined | 'panel-not-opened' | 'driver-error',
-  applied: [{ group, options: [...] }],   // 观测到确实选中的
-  skipped: [{ group, value, reason }]      // 'unknown-option' | 'vip-locked' | 'click-no-effect' | 'empty'
+  reason: undefined | 'panel-not-opened' | 'no-frame' | 'driver-error',
+  applied: [{ group, options: [...] }],   // 整组回读后观测确实选中的
+  skipped: [{ group, value, reason }],     // 'unknown-option' | 'vip-locked' | 'click-no-effect'
+  listEmptyAfterApply: false | true        // 确定后命中零结果空态屏（非错误，是合法终态）
 }
 ```
-`ok:false + applied:[]`（面板没开/崩）与 `ok:true + applied:[]`（plan 本就为空）**必须可区分** —— 否则"啥也没做"和"坏了"长得一样，违背可观测初衷。
+- `ok:false + applied:[]`（面板没开/无 frame/崩）与 `ok:true + applied:[]`（plan 本就为空）**必须可区分** —— 否则"啥也没做"和"坏了"长得一样，违背可观测初衷。
+- `skipped` 的 `reason` 只有三种;**纯层"空值/`enabled:false` 不进 `apply`"的维度根本不出现在报告里**（不是 `skipped`），与 planner 约定一致(不存在 `'empty'` reason)。
 
 健壮性：整个 driver 包 try/catch；任何抛错 → 返回 `{ ok:false, reason:'driver-error', applied:[], skipped:[...] }`，**绝不让整轮崩**（与 PR「无效正则不让整轮崩」一致）。driver 不读配置、不碰预算、不决定调用时机 —— 纯粹「按给定 plan 操作面板一次」。
 
@@ -144,13 +148,18 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 - **`page-state.mjs`** 的 `detectState`/`waitForState`（返回 `LIST`）= driver 第 8 步「等列表稳定」原语。
 
 需补（交付物，增量、不破坏现有）：
-- **worker 加一个一次性命令** `apply-native-filter`（payload 带 `nativeFilter` 配置 → 内部 `planNativeFilter` + `applyNativeFilter` → 回报告）+ 一个 `diagnose-filter` 探针（dump `.filter-panel` 结构 / `.vip-mask` 状态 / 各组 `.option` 文案），仿现有 `diagnose-reject`。IPC 透传已接受任意 `{type, ...params}`，**只需在 worker 的 `switch` 加 `case` + 可选 GUI 按钮**。这给 driver 一个「不跑整轮、单步打真账号」的回路，是目前唯一缺口。
+- **worker 加一个一次性命令** `apply-native-filter`（payload 带 `nativeFilter` 配置 → 内部 `planNativeFilter` + `applyNativeFilter` → 回报告）+ 一个 `diagnose-filter` 探针（dump `.filter-panel` 结构 / `.vip-mask` 状态 / 各组 `.option` 文案 / 各组单选多选行为 / 零结果空态选择器），仿现有 `diagnose-reject`。IPC 透传已接受任意 `{type, ...params}`，**只需在 worker 的 `switch` 加 `case` + 可选 GUI 按钮**。这给 driver 一个「不跑整轮、单步打真账号」的回路，是目前唯一缺口。
+
+  接线注意（Codex 查漏新增,务必遵守）：
+  - **超时**：现有命令回复硬超时 **60s**（`OPEN_SETTING_WINDOW/ipc/index.ts:1038`）。`applyNativeFilter` 含人类光标多次点击 + `确定` 后 `waitForState`，可能逼近/超过 60s → 超时后父进程删掉 pending，worker 的迟到回复**变孤儿**（UI 见超时但浏览器状态已改）。须：给该命令**单独放大超时**（如按 `type` 定制或传 `timeoutMs`），并给 driver **自身有界 deadline**，driver 永远在 deadline 内返回报告而非挂起。
+  - **协议 `ok` 与报告 `ok` 不可混淆**：fd4 协议里 `msg.ok:false` 表示**命令执行失败**（父进程 reject/丢弃 `result`，`ipc/index.ts:1010-1014,1042`）。driver 报告里的 `report.ok:false`（面板没开/降级）是**正常业务结果**。故命令 handler 必须 `reply(true, report)`——**即便 `report.ok===false` 也用协议成功**回传整个报告；协议 `false` 只保留给 worker 自身抛异常。
+  - **frame 为空守卫**：worker 每命令重取 `recommendFrame`（`index.ts:102,123`），现有 frame 依赖命令都先判空（`index.ts:157,170`）。两个新命令同样：取不到 frame 时返回结构化 `{ ok:false, reason:'no-frame' }`，**不要拿 `null` 去调 driver**。
 
 明确不做：offline/fixture（cheerio/jsdom）回放——现仓库无此设施，driver 与现有 reject driver 一样靠真账号手测；引入 fixture 回放超出本 spec。
 
 ## 测试
 
-- **纯层 TDD**（`native-filter.test.mjs`，注入 fixture catalog）：`normalizeOption` 归一（含 `"\n 本科\n"` 样本）、catalog 文案解析、单选 vs 多选、不合法文案进 `skipped`、空/`disabled` 产空计划、单选给数组取首个、多选给字符串包成数组。
+- **纯层 TDD**（`native-filter.test.mjs`，注入 fixture catalog）：`normalizeOption` 归一（`"\n 本科\n"`、内部空格/Tab、`null`/`undefined`、易冲突值）、catalog 文案解析、单选 vs 多选、不合法文案进 `skipped`、**全不合法 → 全 `skipped` 且 `apply` 空**、空值/`enabled:false` 产空计划（该维度**不进** `apply` 也**不进** `skipped`）、单选给数组取首个、多选给字符串包成数组。
 - **driver**：薄 impure 层，靠 `apply-native-filter` 调试命令打真账号手测（见清单）。
 - 不引新依赖。沿用 `node:test`。
 
@@ -163,6 +172,8 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 5. 不合法文案 → 进 `skipped`（`unknown-option`），其余正常。
 6. 重复发同一命令两次（幂等）：第二次因「清空再选」结果一致，不叠加旧选择。
 7. 面板打不开（临时改坏触发器选择器模拟）→ 报告 `ok:false, reason:'panel-not-opened'`，不崩。
+8. 空 plan / `enabled:false` → `ok:true, applied:[], skipped:[]`（与 #7 的 `ok:false` 可区分）。
+9. 故意设极严筛选打到零结果 → `ok:true, listEmptyAfterApply:true`，driver 不挂起（验证空态分支）。
 
 ## 集成（非本 spec 决定，仅备注供后续 agent 参考）
 
@@ -176,7 +187,7 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 - `constant.mjs`：新增面板选择器（增量）
 - `default-config-file/candidate-filter.json`：补**最小** `nativeFilter` 默认（`{ "enabled": false }`，不塞满示例 9 键）（增量）
 - `runtime-file-utils.mjs`：`jobFilterToCandidateFilter` 返回对象加 `nativeFilter` 透传（增量）+ 对应 `__jobFilterToCandidateFilter` 单测
-- `BOSS_RECOMMEND_DEBUG_MAIN/index.ts`：加 `apply-native-filter` 与 `diagnose-filter` 两个 `case`（+ 可选 GUI 按钮）（增量，单步真账号回路）
+- `BOSS_RECOMMEND_DEBUG_MAIN/index.ts`：加 `apply-native-filter` 与 `diagnose-filter` 两个 `case`（+ 可选 GUI 按钮）（增量，单步真账号回路）；`OPEN_SETTING_WINDOW/ipc/index.ts`：给 `apply-native-filter` 放大命令超时（>60s 或按 `type` 定制）
 - **不改** `orchestrator.mjs` 主循环控制流。
 
 ## Opus review 已并入的必改/应改点（供 Codex 查漏对照）
@@ -190,3 +201,16 @@ PR #10 的推荐主循环目前所有筛选都在**客户端**：抓全部卡片
 - 清空再选（`.default.option`）保证调用幂等、单选无残留
 - 报告含 `ok/reason`，区分「面板没开/崩」与「plan 为空」
 - 默认配置最小化（`{enabled:false}`）；catalog 作参数注入便于单测
+
+## Codex 查漏补缺已并入（第二轮）
+
+- 调试命令 60s 超时 vs driver 时长：放大超时 + driver 有界 deadline，杜绝孤儿回复
+- fd4 协议 `ok:false`（命令失败）与 driver `report.ok:false`（业务降级）不可混淆 → handler `reply(true, report)`
+- 确定后**零结果空态屏**是合法终态：等 "LIST 或 空态" 任一，`listEmptyAfterApply` 标记，不死等 `LIST`
+- 顶层 scope 段残留的旧 `(target, cursor, plan)` 签名 → 统一为 `(page, frame, cursor, plan)`
+- `plan.apply[].options` 单一约定＝原始 catalog 文案；归一只在运行期比对时双边各做一次
+- 整组回读验证替代逐点记录 → 兼容单选自动反选；`single` 真值用 `diagnose-filter` 核对
+- `major` 等组 `.option` 可能嵌 `.popover` 包裹 → 用后代选择器
+- 两个新命令 frame 为空守卫 → 返回 `reason:'no-frame'`，不拿 `null` 调 driver
+- 报告 `skipped.reason` 收敛为三种，去掉无意义的 `'empty'`；术语 `enabled:false` 全文一致
+- 单测补全不合法/空 plan、`normalizeOption` 的 `null`/内部空白边界
