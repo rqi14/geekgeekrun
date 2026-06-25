@@ -40,6 +40,12 @@ export async function buildRecommendCfgAndLlm ({ config, recommendPageOpts, filt
     if (rubric) {
       recCfg.llm = { rubric, modelId: scoringCfg.modelId ?? null }
       recLlmFn = undefined
+      // 打招呼门与 rubric.passThreshold 对齐（用户显式配的 minScoreToChat 优先）；
+      // scorer-gate 的失败兜底也用同一个 minScoreToChat，保证失败时一致 fail-closed。
+      const explicitMin = config?.scoring?.minScoreToChat
+      if (rubric && typeof rubric.passThreshold === 'number' && explicitMin == null) {
+        recCfg.minScoreToChat = rubric.passThreshold
+      }
     } else {
       logWarn('[boss-auto-browse] 评分已启用但无 rubric/JD，回退规则-only')
       recLlmFn = async () => ({ score: recCfg.minScoreToChat })

@@ -43,12 +43,14 @@ async function closeBusinessBlock (page) {
 export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   const cursor = await createHumanCursor(page)
   const q = await readQuota(page).catch(() => null)
+  const liveGreet = q?.greet?.remaining
+  const liveView = q?.view?.remaining
   const budgets = {
-    greet: q?.greet?.remaining ?? cfg.maxGreetPerRun,
-    view: q?.view?.remaining ?? cfg.maxViewPerRun ?? 20,
+    greet: Math.min(cfg.maxGreetPerRun ?? Infinity, liveGreet ?? cfg.maxGreetPerRun ?? 0),
+    view: Math.min(cfg.maxViewPerRun ?? Infinity, liveView ?? cfg.maxViewPerRun ?? 20),
     x: cfg.maxXPerRun
   }
-  if (budgets.greet <= 0 && budgets.view <= 0) return
+  if (budgets.greet <= 0 || budgets.view <= 0) return
 
   // Layer-0 服务端预筛（操作基座）：设一次原生筛选面板，改变"推谁"。enabled=false→plan 空→no-op。
   if (cfg.nativeFilter?.enabled) {
@@ -160,14 +162,18 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     }
     const summaryObj = await readSummary(frame)
     const fullText = await captureResumeText(page, cfg.canvasHook)
-    const resume = { summary: summaryObj.summary, fullText: fullText || summaryObj.summary }
+    // 身份校验：canvas 全文须含候选人姓名或其某个学校，否则视为未确认（可能抓空/串号）
+    const idNeedles = [c.geekName, ...(Array.isArray(c.schools) ? c.schools : [])].filter(Boolean)
+    const canvasOk = !!fullText && idNeedles.some((n) => fullText.includes(n))
+    const resume = { summary: summaryObj.summary, fullText: fullText || summaryObj.summary, canvasOk }
     const s = await score(c, resume, cfg, llmFn)
     scored.push({
       candidate: c,
       score: s.score,
       hardReject: s.hardReject,
-      reason: s.reason,
-      resumeChars: (resume.fullText || '').length
+      reason: canvasOk ? s.reason : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
+      resumeChars: (fullText || '').length,
+      canvasOk
     })
     await closeResume(page, frame, cursor)
     if (!cfg.dryRun && s.hardReject && budgets.x > 0 && shouldClickX(cfg)) {
@@ -180,9 +186,10 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   }
 
   // ---------- C 相：选最好 + 打招呼（烧沟通额度） ----------
-  const greetSet = selectForGreet(scored, {
+  const greetable = scored.filter((s) => s.canvasOk !== false)
+  const greetSet = selectForGreet(greetable, {
     minScore: cfg.minScoreToChat,
-    greetBudget: cfg.dryRun ? scored.length : budgets.greet
+    greetBudget: cfg.dryRun ? greetable.length : budgets.greet
   })
   if (cfg.dryRun) {
     return {
@@ -200,7 +207,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         hardReject: s.hardReject,
         reason: s.reason,
         resumeChars: s.resumeChars ?? 0,
-        hasViewed: !!s.candidate._hasViewed
+        hasViewed: !!s.candidate._hasViewed,
+        canvasOk: s.canvasOk
       })),
       wouldGreet: greetSet.map((g) => ({ geekName: g.candidate.geekName, score: g.score })),
       budgets

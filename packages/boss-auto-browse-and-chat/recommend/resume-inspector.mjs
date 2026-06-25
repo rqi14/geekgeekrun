@@ -108,7 +108,7 @@ export async function closeResume (page, frame, cursor) {
  * @param {{timeoutMs?:number, intervalMs?:number, stableNeeded?:number}} [opts]
  * @returns {Promise<string>}
  */
-export async function captureResumeText (page, canvasHook, { timeoutMs = 6000, intervalMs = 400, stableNeeded = 2 } = {}) {
+export async function captureResumeText (page, canvasHook, { timeoutMs = 9000, intervalMs = 400, stableNeeded = 3 } = {}) {
   if (!canvasHook?.getCapturedText) return ''
   const deadline = Date.now() + timeoutMs
   let last = -1
