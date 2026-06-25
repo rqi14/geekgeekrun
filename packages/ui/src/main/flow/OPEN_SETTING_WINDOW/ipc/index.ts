@@ -1034,8 +1034,10 @@ export default function initIpc() {
       bossRecommendDebugProcess.stdio[3] as WriteStream,
       JSON.stringify({ ...cmd, id }) + '\n'
     )
-    // applyNativeFilter 含人类光标多次点击 + 等列表稳定，可能逼近 60s，单独放大超时避免孤儿回复
-    const cmdTimeoutMs = cmd.type === 'apply-native-filter' ? 150000 : 60000
+    // dry-run-sequence 是整轮（多候选人开简历 + 每人一次 LLM 精评，单次可能 30s），需很长超时；
+    // applyNativeFilter 含人类光标多次点击 + 等列表稳定，可能逼近 60s。其余默认 60s。
+    const cmdTimeoutMs =
+      cmd.type === 'dry-run-sequence' ? 600000 : cmd.type === 'apply-native-filter' ? 150000 : 60000
     try {
       const result = await Promise.race([
         defer.promise,
