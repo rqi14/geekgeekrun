@@ -25,6 +25,7 @@ export async function buildRecommendCfgAndLlm ({ config, recommendPageOpts, filt
     delayBetweenActionsMs: recommendPageOpts.delayBetweenActionsMs ?? [1500, 4000],
     minScoreToChat: config?.scoring?.minScoreToChat ?? 0,
     onScoreError: config?.scoring?.onScoreError ?? 'skip',
+    scoreConcurrency: recommendPageOpts.scoreConcurrency ?? 4,
     llm: {}
   }
   const scoringCfg = config?.scoring || {}

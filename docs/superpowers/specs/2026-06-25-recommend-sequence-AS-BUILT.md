@@ -14,10 +14,12 @@ A 收集（免费，拟人滚动 scrollGently）
    → fieldKnockout（专业/方向 include/exclude 关键词；命中排除且无包含→跳过，不点X）
    → 灰区默认入池；按 学校层级rank×1000 + cheapPrescore 排序
   ↓
-B 开简历（烧查看额度，min(per-job, 真实剩余)）
+B 串行抽简历（烧查看额度，min(per-job, 真实剩余)）+ 并发评分
    scrollCardIntoView → clearCapturedText → openResume → assertIdentity
-   → captureResumeText（canvas 全文，稳定等待 9s/3稳）→ 身份交叉校验(含姓名/学校)
-   → score（evaluateResumeByRubric 完整 rubric）
+   → captureResumeText（canvas 全文，稳定等待 9s/3稳）→ closeResume → 身份交叉校验(含姓名/学校)
+   → 把 score（evaluateResumeByRubric 完整 rubric）丢进并发池(createPool, cap=scoreConcurrency 默认4)
+   抽下一份时上一份在后台评分；末尾 Promise.allSettled 收齐 → scored
+   hardReject 的人补X延后到 scored 收齐后串行做（卡片不虚拟化、仍在列表）
   ↓
 C 选最优 + 打招呼（烧沟通额度）
    canvasOk===false 的人剔除（fail-closed，绝不靠抓空/串号简历打招呼）

@@ -11,6 +11,7 @@ import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
 import { readQuota } from './quota-reader.mjs'
 import { rankForOpen, selectForGreet } from './pure/selection.mjs'
+import { createPool } from './pure/concurrency.mjs'
 import { planNativeFilter } from './pure/native-filter.mjs'
 import { applyNativeFilter } from './native-filter-driver.mjs'
 import { fieldKnockout } from './pure/field-knockout.mjs'
@@ -154,8 +155,11 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     budgets.view
   )
 
-  // ---------- B 相：开简历 + 打分（烧查看额度） ----------
-  const scored = []
+  // ---------- B 相：串行抽简历（烧查看额度）+ 并发评分 ----------
+  // 浏览器抽取必须串行（单页面）；但每抽到一份简历就把 LLM 评分丢进并发池后台跑，
+  // 抽下一份时上一份正在评分，把 N×(抽+评) 串行压成 ~抽取墙钟 + 末尾评分。
+  const scheduleScore = createPool(cfg.scoreConcurrency ?? 4)
+  const scoringTasks = []
   let opened = 0
   for (const c of openSet) {
     if (cfg.dryRun) {
@@ -184,27 +188,49 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     }
     const summaryObj = await readSummary(frame)
     const fullText = await captureResumeText(page, cfg.canvasHook)
-    // 身份校验：canvas 全文须含候选人姓名或其某个学校，否则视为未确认（可能抓空/串号）
+    await closeResume(page, frame, cursor)
+    // 身份校验快照：canvas 全文须含候选人姓名或其某个学校，否则视为未确认（可能抓空/串号）
     const idNeedles = [c.geekName, ...(Array.isArray(c.schools) ? c.schools : [])].filter(Boolean)
     const canvasOk = !!fullText && idNeedles.some((n) => fullText.includes(n))
     const resume = { summary: summaryObj.summary, fullText: fullText || summaryObj.summary, canvasOk }
-    const s = await score(c, resume, cfg, llmFn)
-    scored.push({
-      candidate: c,
-      score: s.score,
-      hardReject: s.hardReject,
-      reason: canvasOk ? s.reason : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
-      resumeChars: (fullText || '').length,
-      canvasOk
-    })
-    await closeResume(page, frame, cursor)
-    if (!cfg.dryRun && s.hardReject && budgets.x > 0 && shouldClickX(cfg)) {
-      if (await rejectFromList(page, frame, cursor, c.encryptGeekId, s.reason, c)) budgets.x--
-    }
+    // 评分只调 LLM、不碰浏览器，进并发池后台跑；闭包捕获的是已抽好的快照字符串，
+    // 与下一份的 clearCapturedText/captureResumeText 不冲突。
+    scoringTasks.push(
+      scheduleScore(async () => {
+        const s = await score(c, resume, cfg, llmFn)
+        return {
+          candidate: c,
+          score: s.score,
+          hardReject: s.hardReject,
+          reason: canvasOk ? s.reason : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
+          resumeChars: (fullText || '').length,
+          canvasOk
+        }
+      })
+    )
     await sleepWithRandomDelay(
       cfg.delayBetweenActionsMs?.[0] ?? 1500,
       cfg.delayBetweenActionsMs?.[1] ?? 4000
     )
+  }
+  // 等所有并发评分落地（score() 内部已吞 LLM 异常；allSettled 再兜一层，异常项丢弃）
+  const settled = await Promise.allSettled(scoringTasks)
+  const scored = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value)
+
+  // 硬不达标的人补 X：延后到评分全部落地后串行做（卡片不虚拟化、仍在列表里）
+  if (!cfg.dryRun) {
+    for (const r of scored) {
+      if (budgets.x <= 0) break
+      if (!r.hardReject || !shouldClickX(cfg)) continue
+      const frame = getFrame()
+      const g = await guard(frame)
+      if (g === 'break') break
+      if (g === 'retry') continue
+      await scrollCardIntoView(frame, r.candidate.encryptGeekId)
+      if (await rejectFromList(page, frame, cursor, r.candidate.encryptGeekId, r.reason, r.candidate)) {
+        budgets.x--
+      }
+    }
   }
 
   // ---------- C 相：选最好 + 打招呼（烧沟通额度） ----------
