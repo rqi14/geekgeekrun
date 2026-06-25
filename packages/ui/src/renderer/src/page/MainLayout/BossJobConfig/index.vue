@@ -16,12 +16,9 @@
         <el-collapse-item v-for="job in jobsList" :key="job.jobId" :name="job.jobId">
           <template #title>
             <span class="collapse-title">{{ job.jobName }}</span>
-            <el-button
-              size="small"
-              text
-              class="copy-btn"
-              @click.stop="openCopyDialog(job)"
-            >从其他职位复制</el-button>
+            <el-button size="small" text class="copy-btn" @click.stop="openCopyDialog(job)"
+              >从其他职位复制</el-button
+            >
           </template>
 
           <el-form :model="job" label-position="top" class="job-form">
@@ -64,15 +61,23 @@
                     text
                     :disabled="!job.filter.expectEducationEnabled"
                     @click="job.filter.expectEducationRegExpStr = preset.value"
-                  >{{ preset.label }}</el-button>
+                    >{{ preset.label }}</el-button
+                  >
                 </div>
               </el-form-item>
             </div>
 
             <div class="filter-row">
               <el-checkbox
-                :model-value="job.filter.expectWorkExpMinEnabled || job.filter.expectWorkExpMaxEnabled"
-                @change="(v) => { job.filter.expectWorkExpMinEnabled = v; job.filter.expectWorkExpMaxEnabled = v }"
+                :model-value="
+                  job.filter.expectWorkExpMinEnabled || job.filter.expectWorkExpMaxEnabled
+                "
+                @change="
+                  (v) => {
+                    job.filter.expectWorkExpMinEnabled = v
+                    job.filter.expectWorkExpMaxEnabled = v
+                  }
+                "
               />
               <el-form-item label="工作经验范围（年）" class="flex-1">
                 <div class="range-input-wrap">
@@ -80,7 +85,9 @@
                     v-model="job.filter.expectWorkExpRange[0]"
                     :min="0"
                     controls-position="right"
-                    :disabled="!job.filter.expectWorkExpMinEnabled && !job.filter.expectWorkExpMaxEnabled"
+                    :disabled="
+                      !job.filter.expectWorkExpMinEnabled && !job.filter.expectWorkExpMaxEnabled
+                    "
                     placeholder="最少"
                   />
                   <span class="range-sep">~</span>
@@ -88,7 +95,9 @@
                     v-model="job.filter.expectWorkExpRange[1]"
                     :min="0"
                     controls-position="right"
-                    :disabled="!job.filter.expectWorkExpMinEnabled && !job.filter.expectWorkExpMaxEnabled"
+                    :disabled="
+                      !job.filter.expectWorkExpMinEnabled && !job.filter.expectWorkExpMaxEnabled
+                    "
                     placeholder="最多（99=不限）"
                   />
                 </div>
@@ -97,8 +106,15 @@
 
             <div class="filter-row">
               <el-checkbox
-                :model-value="job.filter.expectSalaryMinEnabled || job.filter.expectSalaryMaxEnabled"
-                @change="(v) => { job.filter.expectSalaryMinEnabled = v; job.filter.expectSalaryMaxEnabled = v }"
+                :model-value="
+                  job.filter.expectSalaryMinEnabled || job.filter.expectSalaryMaxEnabled
+                "
+                @change="
+                  (v) => {
+                    job.filter.expectSalaryMinEnabled = v
+                    job.filter.expectSalaryMaxEnabled = v
+                  }
+                "
               />
               <el-form-item label="期望薪资范围（K/月）" class="flex-1">
                 <div class="range-input-wrap">
@@ -106,7 +122,9 @@
                     v-model="job.filter.expectSalaryRange[0]"
                     :min="0"
                     controls-position="right"
-                    :disabled="!job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled"
+                    :disabled="
+                      !job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled
+                    "
                     placeholder="最低"
                   />
                   <span class="range-sep">~</span>
@@ -114,7 +132,9 @@
                     v-model="job.filter.expectSalaryRange[1]"
                     :min="0"
                     controls-position="right"
-                    :disabled="!job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled"
+                    :disabled="
+                      !job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled
+                    "
                     placeholder="最高"
                   />
                 </div>
@@ -127,7 +147,9 @@
               <el-form-item label="薪资为「面议」时" class="flex-1">
                 <el-select
                   v-model="job.filter.expectSalaryWhenNegotiable"
-                  :disabled="!job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled"
+                  :disabled="
+                    !job.filter.expectSalaryMinEnabled && !job.filter.expectSalaryMaxEnabled
+                  "
                   style="width: 100%"
                 >
                   <el-option value="exclude" label="不通过（排除）" />
@@ -137,13 +159,46 @@
               </el-form-item>
             </div>
 
+            <!-- ── 推荐牛人页：卡片初筛 ── -->
+            <div class="section-label">
+              <span>专业/方向相关性（卡片初筛）</span>
+              <el-tag size="small" type="success"
+                >推荐牛人页：开简历前按关键词粗筛，省查看额度</el-tag
+              >
+            </div>
+            <div class="form-tip">
+              命中「排除词」且未命中「包含词」→ 不开简历（跳过）；命中「包含词」→ 保留；都不命中 →
+              默认开（交简历精评决定）。例外词放进「包含词」即可压过排除（如
+              液滴微流控/自组装/冻干）。
+            </div>
+            <el-form-item label="排除词（疑似不对口）" class="flex-1">
+              <el-input
+                v-model="job.filter.fieldExcludeStr"
+                placeholder="多个用逗号分隔，例如：分子生物,细胞生物,免疫,CRISPR"
+                @blur="
+                  job.filter.fieldExcludeStr = normalizeCommaSplittedStr(job.filter.fieldExcludeStr)
+                "
+              />
+            </el-form-item>
+            <el-form-item label="包含/例外词（对口，压过排除）" class="flex-1">
+              <el-input
+                v-model="job.filter.fieldIncludeStr"
+                placeholder="多个用逗号分隔，例如：化工,材料,微球,液滴微流控,自组装,冻干"
+                @blur="
+                  job.filter.fieldIncludeStr = normalizeCommaSplittedStr(job.filter.fieldIncludeStr)
+                "
+              />
+            </el-form-item>
+
             <!-- ── 沟通页专属 ── -->
             <div class="section-label">
               <span>简历全文筛选</span>
               <el-tag size="small" type="warning">仅沟通页生效，推荐牛人页不使用此项</el-tag>
             </div>
 
-            <div class="form-tip resume-filter-tip">勾选一个或多个筛选模块；全部不勾选则不筛选简历全文</div>
+            <div class="form-tip resume-filter-tip">
+              勾选一个或多个筛选模块；全部不勾选则不筛选简历全文
+            </div>
 
             <div class="filter-row resume-module-row">
               <el-checkbox v-model="job.filter.resumeKeywordsEnabled" label="关键词匹配" />
@@ -181,38 +236,39 @@
             <div class="filter-row resume-module-row">
               <el-checkbox v-model="job.filter.resumeLlmEnabled" label="大模型筛选（AI Rubric）" />
             </div>
-              <div v-if="job.filter.resumeLlmEnabled" class="resume-module-content llm-rubric-panel">
+            <div v-if="job.filter.resumeLlmEnabled" class="resume-module-content llm-rubric-panel">
               <!-- Step 1: AI Rubric Builder -->
               <div class="rubric-step">
                 <div class="rubric-step-label">Step 1：智能生成</div>
-                  <el-form-item label="模型（用于生成评分标准）" style="margin-bottom: 8px">
-                    <el-select
-                      v-model="job.filter.resumeLlmConfig.rubricGenerationModelId"
-                      placeholder="默认：按 boss-llm.json 的 purpose/默认模型选择"
-                      clearable
-                      filterable
-                      style="width: 100%"
-                      :loading="bossLlmModelsLoading"
-                    >
-                      <el-option
-                        v-for="m in bossLlmEnabledModels"
-                        :key="m.id"
-                        :label="m.label"
-                        :value="m.id"
-                      />
-                    </el-select>
-                    <el-alert
-                      v-if="!bossLlmModelsLoading && bossLlmEnabledModels.length === 0"
-                      type="warning"
-                      show-icon
-                      :closable="false"
-                      title="未检测到可用模型：请先到「招聘端大语言模型配置」添加并启用至少一个模型"
-                      style="margin-top: 8px"
+                <el-form-item label="模型（用于生成评分标准）" style="margin-bottom: 8px">
+                  <el-select
+                    v-model="job.filter.resumeLlmConfig.rubricGenerationModelId"
+                    placeholder="默认：按 boss-llm.json 的 purpose/默认模型选择"
+                    clearable
+                    filterable
+                    style="width: 100%"
+                    :loading="bossLlmModelsLoading"
+                  >
+                    <el-option
+                      v-for="m in bossLlmEnabledModels"
+                      :key="m.id"
+                      :label="m.label"
+                      :value="m.id"
                     />
-                    <div class="form-tip">
-                      不选则使用默认模型；可在「招聘端 LLM 配置」里设置 purposeDefaultModelId.rubric_generation。
-                    </div>
-                  </el-form-item>
+                  </el-select>
+                  <el-alert
+                    v-if="!bossLlmModelsLoading && bossLlmEnabledModels.length === 0"
+                    type="warning"
+                    show-icon
+                    :closable="false"
+                    title="未检测到可用模型：请先到「招聘端大语言模型配置」添加并启用至少一个模型"
+                    style="margin-top: 8px"
+                  />
+                  <div class="form-tip">
+                    不选则使用默认模型；可在「招聘端 LLM 配置」里设置
+                    purposeDefaultModelId.rubric_generation。
+                  </div>
+                </el-form-item>
                 <el-input
                   v-model="job.filter.resumeLlmConfig.sourceJd"
                   type="textarea"
@@ -302,32 +358,58 @@
                             class="dimension-weight"
                           />
                           <span class="weight-label">权重 {{ dim.weight }}%</span>
-                          <el-button size="small" text type="danger" @click="removeDimension(job, idx)">
+                          <el-button
+                            size="small"
+                            text
+                            type="danger"
+                            @click="removeDimension(job, idx)"
+                          >
                             删除
                           </el-button>
                         </div>
                         <div class="dimension-criteria">
                           <div class="criteria-row">
                             <span class="criteria-score">1 分</span>
-                            <el-input v-model="dim.criteria['1']" placeholder="1分标准" size="small" />
+                            <el-input
+                              v-model="dim.criteria['1']"
+                              placeholder="1分标准"
+                              size="small"
+                            />
                           </div>
                           <div class="criteria-row">
                             <span class="criteria-score">3 分</span>
-                            <el-input v-model="dim.criteria['3']" placeholder="3分标准" size="small" />
+                            <el-input
+                              v-model="dim.criteria['3']"
+                              placeholder="3分标准"
+                              size="small"
+                            />
                           </div>
                           <div class="criteria-row">
                             <span class="criteria-score">5 分</span>
-                            <el-input v-model="dim.criteria['5']" placeholder="5分标准" size="small" />
+                            <el-input
+                              v-model="dim.criteria['5']"
+                              placeholder="5分标准"
+                              size="small"
+                            />
                           </div>
                         </div>
                       </el-card>
-                      <el-button size="small" plain @click="addDimension(job)">+ 添加维度</el-button>
+                      <el-button size="small" plain @click="addDimension(job)"
+                        >+ 添加维度</el-button
+                      >
                     </div>
                   </div>
                   <div class="rubric-block pass-threshold">
                     <span class="rubric-block-title">通过分数线</span>
-                    <el-slider v-model="job.filter.resumeLlmConfig.passThreshold" :min="0" :max="100" :marks="{ 0: '0', 50: '50', 75: '75', 100: '100' }" />
-                    <span class="threshold-value">≥ {{ job.filter.resumeLlmConfig.passThreshold }} 分通过</span>
+                    <el-slider
+                      v-model="job.filter.resumeLlmConfig.passThreshold"
+                      :min="0"
+                      :max="100"
+                      :marks="{ 0: '0', 50: '50', 75: '75', 100: '100' }"
+                    />
+                    <span class="threshold-value"
+                      >≥ {{ job.filter.resumeLlmConfig.passThreshold }} 分通过</span
+                    >
                   </div>
                 </div>
               </div>
@@ -354,13 +436,16 @@
 
     <!-- 复制配置对话框 -->
     <el-dialog v-model="copyDialogVisible" title="从其他职位复制配置" width="400px">
-      <el-text>将以下职位的筛选配置复制到「{{ copyTargetJob?.jobName }}」（会覆盖当前配置）：</el-text>
+      <el-text
+        >将以下职位的筛选配置复制到「{{ copyTargetJob?.jobName }}」（会覆盖当前配置）：</el-text
+      >
       <el-radio-group v-model="copySourceJobId" class="copy-source-list">
         <el-radio
           v-for="j in jobsList.filter((j) => j.jobId !== copyTargetJob?.jobId)"
           :key="j.jobId"
           :value="j.jobId"
-        >{{ j.jobName }}</el-radio>
+          >{{ j.jobName }}</el-radio
+        >
       </el-radio-group>
       <template #footer>
         <el-button @click="copyDialogVisible = false">取消</el-button>
@@ -410,6 +495,8 @@ interface JobFilter {
   expectSalaryMaxEnabled: boolean
   expectSalaryRange: [number, number]
   expectSalaryWhenNegotiable: 'exclude' | 'include'
+  fieldIncludeStr: string
+  fieldExcludeStr: string
   resumeKeywordsEnabled: boolean
   resumeKeywordsStr: string
   resumeRegExpEnabled: boolean
@@ -459,6 +546,8 @@ function rawToJobItem(raw: Record<string, any>): JobItem {
       expectSalaryRange: f.expectSalaryRange ?? [0, 0],
       expectSalaryWhenNegotiable:
         f.expectSalaryWhenNegotiable === 'include' ? 'include' : 'exclude',
+      fieldIncludeStr: Array.isArray(f.fieldRules?.include) ? f.fieldRules.include.join(',') : '',
+      fieldExcludeStr: Array.isArray(f.fieldRules?.exclude) ? f.fieldRules.exclude.join(',') : '',
       resumeKeywordsEnabled: f.resumeKeywordsEnabled ?? false,
       resumeKeywordsStr: Array.isArray(f.resumeKeywords)
         ? f.resumeKeywords.join(',')
@@ -475,7 +564,9 @@ function rawToJobItem(raw: Record<string, any>): JobItem {
 function parseResumeLlmConfig(raw: any): ResumeLlmConfig {
   if (!raw || typeof raw !== 'object') return defaultResumeLlmConfig()
   const r = raw.rubric || {}
-  const knockouts = Array.isArray(r.knockouts) ? r.knockouts.filter((k: any) => typeof k === 'string') : []
+  const knockouts = Array.isArray(r.knockouts)
+    ? r.knockouts.filter((k: any) => typeof k === 'string')
+    : []
   const dimensions = (Array.isArray(r.dimensions) ? r.dimensions : []).map((d: any) => ({
     name: String(d?.name ?? ''),
     weight: typeof d?.weight === 'number' ? d.weight : 33,
@@ -488,7 +579,8 @@ function parseResumeLlmConfig(raw: any): ResumeLlmConfig {
   return {
     sourceJd: String(raw.sourceJd ?? ''),
     passThreshold: typeof raw.passThreshold === 'number' ? raw.passThreshold : 75,
-    rubricGenerationModelId: typeof raw.rubricGenerationModelId === 'string' ? raw.rubricGenerationModelId : null,
+    rubricGenerationModelId:
+      typeof raw.rubricGenerationModelId === 'string' ? raw.rubricGenerationModelId : null,
     rubric: { knockouts, dimensions }
   }
 }
@@ -511,6 +603,7 @@ function jobItemToRaw(job: JobItem): Record<string, any> {
       expectSalaryMaxEnabled: f.expectSalaryMaxEnabled,
       expectSalaryRange: f.expectSalaryRange,
       expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable,
+      fieldRules: { include: strToList(f.fieldIncludeStr), exclude: strToList(f.fieldExcludeStr) },
       resumeKeywordsEnabled: f.resumeKeywordsEnabled,
       resumeKeywords: strToList(f.resumeKeywordsStr),
       resumeRegExpEnabled: f.resumeRegExpEnabled,
@@ -567,7 +660,9 @@ onMounted(async () => {
       ? llm.providers.flatMap((p: any) =>
           (p.models ?? []).map((m: any) => ({ ...m, _providerName: p.name }))
         )
-      : (Array.isArray(llm?.models) ? llm.models : [])
+      : Array.isArray(llm?.models)
+        ? llm.models
+        : []
     bossLlmEnabledModels.value = flatModels
       .filter((m: any) => m && m.enabled !== false && typeof m.id === 'string')
       .map((m: any) => ({
@@ -707,11 +802,18 @@ function handleCopyRubricPrompt(job: JobItem) {
   const jd = job.filter.resumeLlmConfig?.sourceJd?.trim() || ''
   if (!jd) return
   const full = RUBRIC_GENERATION_PROMPT + jd
-  navigator.clipboard.writeText(full).then(() => {
-    ElMessage({ type: 'success', message: '已复制 Prompt，可粘贴到 ChatGPT / Claude 等在线 LLM，将返回的 JSON 粘贴回下方的评分标准编辑器' })
-  }).catch(() => {
-    ElMessage({ type: 'error', message: '复制失败，请检查浏览器权限' })
-  })
+  navigator.clipboard
+    .writeText(full)
+    .then(() => {
+      ElMessage({
+        type: 'success',
+        message:
+          '已复制 Prompt，可粘贴到 ChatGPT / Claude 等在线 LLM，将返回的 JSON 粘贴回下方的评分标准编辑器'
+      })
+    })
+    .catch(() => {
+      ElMessage({ type: 'error', message: '复制失败，请检查浏览器权限' })
+    })
 }
 
 const handleGenerateRubric = async (job: JobItem) => {
@@ -786,7 +888,10 @@ function handleImportRubricJson(job: JobItem) {
     }
     job.filter.resumeLlmConfig!.rubric = { knockouts, dimensions }
     job._rubricJsonImport = ''
-    ElMessage({ type: 'success', message: `已导入 ${dimensions.length} 个维度，${knockouts.length} 个否决项` })
+    ElMessage({
+      type: 'success',
+      message: `已导入 ${dimensions.length} 个维度，${knockouts.length} 个否决项`
+    })
   } catch {
     ElMessage({ type: 'error', message: 'JSON 解析失败，请检查格式' })
   }
