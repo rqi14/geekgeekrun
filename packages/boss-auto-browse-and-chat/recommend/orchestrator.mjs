@@ -13,6 +13,8 @@ import { readQuota } from './quota-reader.mjs'
 import { rankForOpen, selectForGreet } from './pure/selection.mjs'
 import { planNativeFilter } from './pure/native-filter.mjs'
 import { applyNativeFilter } from './native-filter-driver.mjs'
+import { fieldKnockout } from './pure/field-knockout.mjs'
+import { schoolTier } from './school-tier.mjs'
 import { BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR, BOSS_RECOMMEND_PAGE_URL } from '../constant.mjs'
 
 /** 推荐页 URL 关键字（被跳走到 user-center 等页面时用于识别"已离开推荐页"） */
@@ -25,6 +27,14 @@ const MAX_STUCK_HEALS = 5
 async function closeBusinessBlock (page) {
   const btn = await page.$(BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR).catch(() => null)
   if (btn) await btn.click().catch(() => {})
+}
+
+/** 候选人多段教育里最高的学校层级 rank（用于开简历排序：先学校档次后启发式） */
+function bestSchoolRank (schools) {
+  const arr = Array.isArray(schools) ? schools : []
+  let best = 0
+  for (const s of arr) { const r = schoolTier(s).rank; if (r > best) best = r }
+  return best
 }
 
 /**
@@ -100,6 +110,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   const pool = new Map()
   const seen = new Set()
   let passedRule = 0 // 过了规则初筛的人数（onlyViewed 过滤之前），用于 dry-run 解释"为什么 pool=0"
+  let fieldKnockedOut = 0 // 卡片层专业/方向对口判定淘汰的人数（dry-run 报告用）
   const target = Math.max((budgets.view || 0) * 2, cfg.waveSize)
   let staleScrolls = 0
   while (pool.size < target && budgets.view > 0) {
@@ -123,6 +134,12 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       }
       passedRule++
       if (cfg.onlyViewed && !c._hasViewed) continue
+      const fk = fieldKnockout(
+        { majors: c.majors, advantage: c.skills, expectDirection: c.expectDirection },
+        cfg.fieldRules || {}
+      )
+      if (fk.result === 'knockout') { fieldKnockedOut++; continue }
+      c._schoolRank = bestSchoolRank(c.schools)
       pool.set(c.encryptGeekId, c)
     }
     staleScrolls = pool.size === before ? staleScrolls + 1 : 0
@@ -130,7 +147,11 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     await scrollGently(page, cfg)
   }
 
-  const openSet = rankForOpen([...pool.values()], cheapPrescore, budgets.view)
+  const openSet = rankForOpen(
+    [...pool.values()],
+    (c) => (c._schoolRank || 0) * 1000 + cheapPrescore(c),
+    budgets.view
+  )
 
   // ---------- B 相：开简历 + 打分（烧查看额度） ----------
   const scored = []
@@ -198,6 +219,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       scoringMode: cfg.llm?.rubric ? 'llm-rubric' : 'rule-only',
       minScoreToChat: cfg.minScoreToChat,
       passedRule,
+      fieldKnockedOut,
       pool: pool.size,
       opened,
       scored: scored.map((s) => ({
@@ -208,6 +230,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         reason: s.reason,
         resumeChars: s.resumeChars ?? 0,
         hasViewed: !!s.candidate._hasViewed,
+        schoolRank: s.candidate._schoolRank ?? 0,
         canvasOk: s.canvasOk
       })),
       wouldGreet: greetSet.map((g) => ({ geekName: g.candidate.geekName, score: g.score })),

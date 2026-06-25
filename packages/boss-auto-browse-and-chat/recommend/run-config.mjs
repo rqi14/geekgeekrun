@@ -12,6 +12,8 @@ export async function buildRecommendCfgAndLlm ({ config, recommendPageOpts, filt
   const recCfg = {
     ...(recommendPageOpts || {}),
     rules: filterConfig,
+    fieldRules: filterConfig?.fieldRules || {},
+    schoolFloorRank: filterConfig?.schoolFloorRank ?? 0,
     nativeFilter: filterConfig?.nativeFilter,
     waveSize: recommendPageOpts.waveSize ?? 6,
     maxGreetPerRun: recommendPageOpts.maxGreetPerRun ?? maxChatPerRun,
