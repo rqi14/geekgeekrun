@@ -45,6 +45,7 @@ import {
  *   candidateIndex?: number
  * }} [options] - 可选：cursor、mainPage（主页面，用于 Canvas 提取与关闭弹窗）；candidateIndex 为列表中的索引
  * @returns {Promise<object>} 详情数据对象
+ * @deprecated 推荐页已改用 recommend/resume-inspector（点开简历弹窗读「经历概览」+ 弹窗内打招呼）。保留导出以防外部引用。
  */
 export async function viewCandidateDetail (frame, candidateItem, options = {}) {
   const { mainPage, getInterceptedData, getCapturedText } = options

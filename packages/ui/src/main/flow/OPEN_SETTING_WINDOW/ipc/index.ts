@@ -578,6 +578,47 @@ export default function initIpc() {
       return { ok: false, error: msg }
     }
   })
+  ipcMain.handle('boss-detect-brand', async (_, payload: {
+    baseURL: string
+    model: string
+    endpoint?: string
+    brand?: string
+  }) => {
+    try {
+      const { resolveModelFamily } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/families.mjs'
+      )
+      const { resolveDialect } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/dialects/index.mjs'
+      )
+      const { resolveModelProfile } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/profiles.mjs'
+      )
+      const family = resolveModelFamily(payload.model)
+      const dialect = resolveDialect({
+        baseURL: payload.baseURL,
+        brandLock: payload.brand ?? 'auto',
+        endpoint: payload.endpoint ?? 'auto',
+        family
+      })
+      const profile = resolveModelProfile({ dialect, family, userOverrides: {} })
+      return {
+        dialectId: dialect.id,
+        label: dialect.label,
+        isReasoningModel: family.isReasoningModel,
+        effortValues: profile.effortValues ?? null,
+        thinkingStyle: profile.thinkingStyle
+      }
+    } catch {
+      return {
+        dialectId: 'generic',
+        label: '通用兼容',
+        isReasoningModel: false,
+        effortValues: null,
+        thinkingStyle: 'top_level_enable'
+      }
+    }
+  })
   // ── end 招聘端 LLM 配置窗口 ──────────────────────────────────────────────────
 
   ipcMain.handle('resume-edit', async () => {
@@ -816,9 +857,9 @@ export default function initIpc() {
     return result
   })
 
-  ipcMain.handle('run-boss-recommend', async () => {
+  ipcMain.handle('run-boss-recommend', async (_, payload?: { jobId?: string | null }) => {
     const mode = 'bossRecommendMain'
-    const { runRecordId } = await runCommon({ mode })
+    const { runRecordId } = await runCommon({ mode, jobId: payload?.jobId ?? null })
     forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
@@ -862,6 +903,23 @@ export default function initIpc() {
     }
     bossChatDebugProcess = null
     bossChatDebugReadyDefer = null
+  }
+
+  // 推荐牛人页调试 worker（与沟通页调试同构，独立进程/状态）
+  let bossRecommendDebugProcess: ChildProcess | null = null
+  let bossRecommendDebugReadyDefer: PromiseWithResolvers<void> | null = null
+  const bossRecommendDebugPendingCmds = new Map<string, PromiseWithResolvers<any>>()
+
+  const closeBossRecommendDebug = () => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      try {
+        bossRecommendDebugProcess.kill('SIGTERM')
+      } catch {
+        // 进程可能已退出（如用户关闭浏览器），忽略
+      }
+    }
+    bossRecommendDebugProcess = null
+    bossRecommendDebugReadyDefer = null
   }
 
   ipcMain.handle('open-boss-chat-debug', async (ev) => {
@@ -960,6 +1018,101 @@ export default function initIpc() {
     closeBossChatDebug()
     return { ok: true }
   })
+
+  // ── 推荐牛人页调试 worker ───────────────────────────────────────────────────
+  ipcMain.handle('open-boss-recommend-debug', async (ev) => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      return { ok: true, alreadyRunning: true }
+    }
+    let puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+    if (!puppeteerExecutable) {
+      try {
+        const parent = BrowserWindow.fromWebContents(ev.sender) || undefined
+        await configWithBrowserAssistant({ autoFind: true, windowOption: { parent, modal: !!parent, show: true } })
+        puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+      } catch { /**/ }
+    }
+    if (!puppeteerExecutable) {
+      return { ok: false, error: 'NO_BROWSER' }
+    }
+    bossRecommendDebugReadyDefer = Promise.withResolvers()
+    bossRecommendDebugProcess = childProcess.spawn(
+      process.argv[0],
+      process.env.NODE_ENV === 'development'
+        ? [process.argv[1], '--mode=bossRecommendDebugMain']
+        : ['--mode=bossRecommendDebugMain'],
+      {
+        env: { ...process.env, PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath, GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME },
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe']
+      }
+    )
+    bossRecommendDebugProcess.once('exit', () => {
+      bossRecommendDebugProcess = null
+      bossRecommendDebugReadyDefer = null
+      mainWindow?.webContents.send('boss-recommend-debug-exited')
+      for (const [, defer] of bossRecommendDebugPendingCmds) {
+        defer.reject(new Error('worker exited'))
+      }
+      bossRecommendDebugPendingCmds.clear()
+    })
+    ;(bossRecommendDebugProcess.stdio[4] as NodeJS.ReadableStream).pipe(JSONStream.parse()).on('data', (msg: any) => {
+      if (msg?.type === 'READY') {
+        if (msg.ok) {
+          bossRecommendDebugReadyDefer?.resolve()
+          mainWindow?.webContents.send('boss-recommend-debug-ready')
+        } else {
+          bossRecommendDebugReadyDefer?.reject(new Error(msg.error ?? 'READY failed'))
+        }
+        return
+      }
+      if (msg?.id) {
+        const defer = bossRecommendDebugPendingCmds.get(msg.id)
+        if (defer) {
+          bossRecommendDebugPendingCmds.delete(msg.id)
+          if (msg.ok) { defer.resolve(msg.result) } else { defer.reject(new Error(msg.error ?? 'command failed')) }
+        }
+      }
+    })
+    try {
+      await bossRecommendDebugReadyDefer.promise
+      return { ok: true }
+    } catch (err: any) {
+      closeBossRecommendDebug()
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('boss-recommend-debug-command', async (_, cmd: { type: string; [k: string]: any }) => {
+    if (!bossRecommendDebugProcess || bossRecommendDebugProcess.killed) {
+      return { ok: false, error: 'DEBUG_WORKER_NOT_RUNNING' }
+    }
+    const id = Math.random().toString(36).slice(2)
+    const defer = Promise.withResolvers<any>()
+    bossRecommendDebugPendingCmds.set(id, defer)
+    pipeWriteRegardlessError(
+      bossRecommendDebugProcess.stdio[3] as WriteStream,
+      JSON.stringify({ ...cmd, id }) + '\n'
+    )
+    // dry-run-sequence 是整轮（多候选人开简历 + 每人一次 LLM 精评，单次可能 30s），需很长超时；
+    // applyNativeFilter 含人类光标多次点击 + 等列表稳定，可能逼近 60s。其余默认 60s。
+    const cmdTimeoutMs =
+      cmd.type === 'dry-run-sequence' ? 600000 : cmd.type === 'apply-native-filter' ? 150000 : 60000
+    try {
+      const result = await Promise.race([
+        defer.promise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), cmdTimeoutMs))
+      ])
+      return { ok: true, result }
+    } catch (err: any) {
+      bossRecommendDebugPendingCmds.delete(id)
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('close-boss-recommend-debug', () => {
+    closeBossRecommendDebug()
+    return { ok: true }
+  })
   // ── end 招聘端调试工具 ───────────────────────────────────────────────────────
 
   ipcMain.handle('run-boss-auto-browse-and-chat', async () => {
@@ -1030,6 +1183,12 @@ export default function initIpc() {
         bossRecruiterConfig.advanced.persistProfile = payload.advanced.persistProfile
       }
     }
+    if (hasOwn(payload, 'scoring') && payload.scoring && typeof payload.scoring === 'object') {
+      bossRecruiterConfig.scoring = {
+        ...bossRecruiterConfig.scoring,
+        ...payload.scoring
+      }
+    }
 
     const candidateFilterConfig = readBossConfigFile('candidate-filter.json') || {}
     if (hasOwn(payload, 'expectCityList')) {
@@ -1055,6 +1214,12 @@ export default function initIpc() {
     }
     if (hasOwn(payload, 'skipViewedCandidates')) {
       candidateFilterConfig.skipViewedCandidates = payload.skipViewedCandidates
+    }
+    if (hasOwn(payload, 'expectSchoolKeywords')) {
+      candidateFilterConfig.expectSchoolKeywords = payload.expectSchoolKeywords
+    }
+    if (hasOwn(payload, 'expectMajorKeywords')) {
+      candidateFilterConfig.expectMajorKeywords = payload.expectMajorKeywords
     }
 
     return await Promise.all([

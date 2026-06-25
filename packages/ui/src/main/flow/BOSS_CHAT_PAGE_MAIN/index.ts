@@ -4,7 +4,7 @@ import { sleep } from '@geekgeekrun/utils/sleep.mjs'
 import { AUTO_CHAT_ERROR_EXIT_CODE } from '../../../common/enums/auto-start-chat'
 import attachListenerForKillSelfOnParentExited from '../../utils/attachListenerForKillSelfOnParentExited'
 import minimist from 'minimist'
-import SqlitePluginModule from '@geekgeekrun/sqlite-plugin'
+import * as SqlitePluginModule from '@geekgeekrun/sqlite-plugin'
 import { connectToDaemon, sendToDaemon } from '../OPEN_SETTING_WINDOW/connect-to-daemon'
 import { checkShouldExit } from '../../utils/worker'
 import initPublicIpc from '../../utils/initPublicIpc'
@@ -48,7 +48,6 @@ const checkForBossVerification = async (page: any): Promise<boolean> => {
     const url: string = page.url()
     if (/verify|captcha|security.?check|safe\b|\/safe\/|安全验证/.test(url)) return true
     return await page.evaluate(() => {
-      const text = (document.body?.innerText || '').toLowerCase()
       const hasVerifyText = /请完成.{0,10}验证|安全验证|滑动.{0,6}滑块|人机验证|完成验证后继续|异常.{0,6}操作|验证码/.test(
         document.body?.innerText || ''
       )
@@ -229,7 +228,7 @@ const runChatPage = async () => {
       // 仅在没有复用浏览器时才重新启动
       if (!browser) {
         log('启动浏览器...')
-        await hooks.beforeBrowserLaunch?.promise?.()
+        await hooks.beforeBrowserLaunch?.promise?.(undefined)
 
         const { buildRecruiterLaunchOptions } = (await import(
           '@geekgeekrun/boss-auto-browse-and-chat/launch-options.mjs'
@@ -238,7 +237,7 @@ const runChatPage = async () => {
         log(`使用 launch options：persistProfile=${!!launchOpts.userDataDir}`)
         browser = await puppeteer.launch(launchOpts)
 
-        await hooks.afterBrowserLaunch?.promise?.()
+        await hooks.afterBrowserLaunch?.promise?.(undefined)
 
         const bossCookies = readStorageFile('boss-cookies.json')
         const bossLocalStorage = readStorageFile('boss-local-storage.json')

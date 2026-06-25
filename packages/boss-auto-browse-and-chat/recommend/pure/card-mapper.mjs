@@ -1,0 +1,49 @@
+const DEGREE_RE = /本科|硕士|博士|大专|专科|MBA|中专|高中|初中/
+
+/** expect 数组形如 [城市, 方向...]；方向 = 去掉第一个(城市)后拼接。空安全。 */
+function deriveExpectDirection (expect) {
+  const arr = Array.isArray(expect) ? expect.filter(Boolean) : []
+  return arr.length > 1 ? arr.slice(1).join(' ') : ''
+}
+
+/**
+ * 归一化 list-scraper 抽出的 raw 卡片为筛选/评分用的候选对象。纯函数。
+ */
+export function mapRawCard (raw) {
+  const baseInfo = Array.isArray(raw.baseInfo) ? raw.baseInfo : []
+  const expect = Array.isArray(raw.expect) ? raw.expect : []
+  const eduExps = Array.isArray(raw.eduExps) ? raw.eduExps : []
+  const workExps = Array.isArray(raw.workExps) ? raw.workExps : []
+  return {
+    encryptGeekId: raw.encryptGeekId ?? '',
+    geekName: raw.name ?? '',
+    salary: raw.salary ?? null,
+    activeText: raw.activeText ?? '',
+    age: baseInfo.find((s) => /岁/.test(s)) ?? null,
+    workExp: baseInfo.find((s) => (/年|经验不限/.test(s)) && !/应届/.test(s)) ?? null,
+    education: baseInfo.find((s) => DEGREE_RE.test(s)) ?? null,
+    city: expect[0] ?? null,
+    jobTitle: expect[1] ?? null,
+    expect,
+    expectLabel: raw.expectLabel || '',
+    expectDirection: deriveExpectDirection(expect),
+    skills: raw.advantage ?? '',
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    eduExps,
+    workExps,
+    schools: eduExps.map((e) => e?.school).filter(Boolean),
+    // 专业槽位有时被学历占用（教育时间线缺少专业 span 时），剔除明显是学历的 token
+    majors: eduExps.map((e) => e?.major).filter(Boolean).filter((m) => !DEGREE_RE.test(m)),
+    _hasViewed: !!raw.hasViewed,
+    inViewport: !!raw.inViewport,
+    interactable: !!raw.interactable
+  }
+}
+
+/** 是否主候选卡（排除相似推荐/促销、无 id 的） */
+export function isPrimaryCard (raw) {
+  if (!raw) return false
+  if (raw.isSimilar) return false
+  if (!raw.encryptGeekId) return false
+  return true
+}

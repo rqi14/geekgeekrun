@@ -15,6 +15,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "node --test \"src/**/*.test.ts\" \"src/**/*.test.mjs\"",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
@@ -86,6 +87,6 @@
     "vite": "^5.0.12",
     "vue": "^3.4.15",
     "vue-router": "^4.2.5",
-    "vue-tsc": "^1.8.27"
+    "vue-tsc": "^3.3.5"
   }
 }

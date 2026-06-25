@@ -6,10 +6,13 @@
   "module": "./main/index.mjs",
   "type": "module",
   "scripts": {
-    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs"
+    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -F geekgeekrun-ui typecheck"
   },
   "author": "geekgeekrun",
   "license": "ISC",
+  "packageManager": "pnpm@11.0.9",
   "dependencies": {
     "@geekgeekrun/puppeteer-extra-plugin-laodeng": "workspace:*",
     "cheerio": "1.0.0-rc.12",
@@ -30,19 +33,6 @@
     "node": "20.16.0"
   },
   "engines": {
-    "pnpm": ">=8.15.9"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "find-chrome-bin@2.0.4": "patches/find-chrome-bin@2.0.4.patch",
-      "puppeteer-extra-plugin-anonymize-ua@2.4.6": "patches/puppeteer-extra-plugin-anonymize-ua@2.4.6.patch"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "better-sqlite3",
-      "electron",
-      "esbuild",
-      "puppeteer"
-    ]
+    "pnpm": ">=9"
   }
 }

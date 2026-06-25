@@ -46,7 +46,7 @@
           按队列逐职位自动执行「推荐牛人」和「沟通页」两个任务。各自的运行策略请分别在对应页面配置：
         </p>
         <div class="preflight-links">
-          <RouterLink :to="{ name: 'BossAutoBrowseAndChat' }">→ 推荐牛人 - 自动开聊（运行策略配置）</RouterLink>
+          <RouterLink :to="{ name: 'RecommendAutomation' }">→ 推荐牛人（运行策略配置）</RouterLink>
           <RouterLink :to="{ name: 'BossChatPage' }">→ 沟通（运行策略配置）</RouterLink>
         </div>
         <div class="action-bar">
@@ -109,7 +109,7 @@ import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-
 const { ipcRenderer } = electron
 
 const isSaving = ref(false)
-const runRecordId = ref<number | null>(null)
+const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 

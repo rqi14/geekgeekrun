@@ -138,12 +138,14 @@ import { PropType } from 'vue'
 defineProps({
   modelValue: {
     type: Object as PropType<{
+      cityList: string[]
       salaryList: number[]
       experienceList: number[]
       degreeList: number[]
       industryList: number[]
       scaleList: number[]
-    }>
+    }>,
+    required: true
   }
 })
 </script>

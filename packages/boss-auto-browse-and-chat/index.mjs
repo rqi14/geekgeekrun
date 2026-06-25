@@ -21,6 +21,8 @@ import { setLevel, debug as logDebug, info as logInfo, warn as logWarn, error as
 import { preflightGhostCursor, randomizeInitialCursorPosition } from './humanMouse.mjs'
 import { buildRecruiterLaunchOptions } from './launch-options.mjs'
 import { checkpointRiskControl } from './risk-detector.mjs'
+import { runRecommendLoop } from './recommend/orchestrator.mjs'
+import { buildRecommendCfgAndLlm } from './recommend/run-config.mjs'
 
 export { default as startBossChatPageProcess } from './chat-page-processor.mjs'
 
@@ -390,7 +392,7 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     // 设置网络拦截器 + Canvas hook（登录成功后立即启动，仅针对推荐牛人 Tab）
     // -----------------------------------------------------------------------
     const { getInterceptedData } = setupNetworkInterceptor(page)
-    await setupCanvasTextHook(page)
+    const canvasHook = await setupCanvasTextHook(page)
 
     // -----------------------------------------------------------------------
     // 读取配置（若指定 jobId 则使用 per-job 合并配置）
@@ -410,193 +412,22 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     let notInterestedLimitReached = false  // 当天"不感兴趣"上限，达到后跳过点击但继续打招呼
 
     // -----------------------------------------------------------------------
-    // 主循环：解析 → 筛选 → 开聊 → 翻页/滚动
+    // 推荐页波次循环（recommend/orchestrator）：列表初筛 → 开简历评分 → 弹窗内打招呼 → 策略性 X
+    // 取代旧的 解析→筛选→滚动 主循环；不再无界滚动（账号安全）。
     // -----------------------------------------------------------------------
+    const { recCfg, recLlmFn } = await buildRecommendCfgAndLlm({
+      config,
+      recommendPageOpts,
+      filterConfig,
+      maxChatPerRun
+    })
+    recCfg.canvasHook = canvasHook
+
     await hooks.onCandidateListLoaded?.promise?.()
-
-    mainLoop: while (true) {
-      // a. 解析候选人列表（在 iframe 的 frame 内操作）
-      logDebug('[boss-auto-browse] 主循环：开始解析候选人列表...')
-      let candidates = []
-      try {
-        candidates = await parseCandidateList(recommendFrame)
-        logInfo('[boss-auto-browse] 解析完成，共', candidates.length, '人')
-      } catch (parseErr) {
-        logWarn('[boss-auto-browse] parseCandidateList 失败，跳过本轮:', parseErr.message)
-      }
-
-      if (candidates.length === 0) {
-        logDebug('[boss-auto-browse] 候选人列表为空，尝试滚动加载…')
-        const hasMore = await scrollAndLoadMore(recommendFrame).catch(() => false)
-        if (!hasMore) {
-          logInfo('[boss-auto-browse] 没有更多候选人，结束本次运行。')
-          break mainLoop
-        }
-        await sleepWithRandomDelay(1000)
-        continue
-      }
-
-      // b. 筛选候选人（经由 onCandidateFiltered waterfall hook，让外部插件也能参与过滤）
-      const rawFilterResult = filterCandidates(candidates, filterConfig)
-      const skippedListForLog = Array.isArray(rawFilterResult?.skipped)
-        ? [...rawFilterResult.skipped]
-        : []
-      let filterResult = rawFilterResult
-      if (hooks.onCandidateFiltered?.promise) {
-        try {
-          const hookResult = await hooks.onCandidateFiltered.promise(candidates, filterResult)
-          if (hookResult != null && (Array.isArray(hookResult.matched) || Array.isArray(hookResult.skipped))) {
-            filterResult = hookResult
-          }
-        } catch (_) { /* hook 出错不影响主流程 */ }
-      }
-
-      // filterResult.matched 的每项是 { candidate, filterResult } 包装对象；无人 tap 时 hook 返回 undefined，用 rawFilterResult
-      const matchedItems = Array.isArray(filterResult?.matched) ? filterResult.matched : rawFilterResult.matched || []
-      // 将每个 matched candidate 映射回 candidates 数组中的原始索引，用于在 iframe li.card-item 列表中定位
-      const matched = matchedItems.map(item => {
-        const c = item?.candidate ?? item
-        const originalIndex = candidates.indexOf(c)
-        return { candidate: c, originalIndex: originalIndex >= 0 ? originalIndex : 0 }
-      })
-
-      for (const item of skippedListForLog) {
-        const candidate = item?.candidate ?? item
-        const fr = item?.filterResult ?? item
-        const name = candidate?.geekName ?? candidate?.encryptGeekId ?? '?'
-        const detail = fr?.reasonDetail ?? `不满足条件 ${fr?.reason ?? 'unknown'}`
-        logInfo(`[boss-auto-browse] 跳过 ${name}：${detail}`)
-      }
-      if (skippedListForLog.length > 0) {
-        const reasonCounts = {}
-        for (const item of skippedListForLog) {
-          const r = item?.filterResult?.reason ?? 'unknown'
-          reasonCounts[r] = (reasonCounts[r] || 0) + 1
-        }
-        logInfo('[boss-auto-browse] 跳过原因统计：', reasonCounts)
-      }
-      if (matched.length > 0) {
-        const passedNames = matched.map(m => m.candidate?.geekName ?? m.candidate?.encryptGeekId ?? '?').join('、')
-        logInfo('[boss-auto-browse] 本轮通过筛选：', passedNames)
-      }
-      logInfo(`[boss-auto-browse] 本轮候选人：共 ${candidates.length} 人，筛选通过 ${matched.length} 人`)
-
-      // 对未通过筛选的候选人点击"不感兴趣"，并按筛选原因选对应弹窗选项以优化 BOSS 推荐；每次点击间隔随机延迟（反检测）
-      if (clickNotInterestedForFiltered && !notInterestedLimitReached && skippedListForLog.length > 0) {
-        const cursor = await (await import('./humanMouse.mjs')).createHumanCursor(page)
-        const indexToFilterResult = new Map()
-        for (const item of skippedListForLog) {
-          const idx = candidates.indexOf(item?.candidate ?? item)
-          if (idx >= 0) indexToFilterResult.set(idx, item?.filterResult ?? item)
-        }
-        const sortedIndices = skippedListForLog
-          .map(s => candidates.indexOf(s?.candidate ?? s))
-          .filter(i => i >= 0)
-          .sort((a, b) => b - a)
-        logInfo('[boss-auto-browse] 将对', sortedIndices.length, '人点击"不感兴趣"（原因与筛选一致）')
-        const delayRange = Array.isArray(delayBetweenNotInterestedMs) && delayBetweenNotInterestedMs.length >= 2
-          ? delayBetweenNotInterestedMs
-          : [800, 2500]
-        for (let i = 0; i < sortedIndices.length; i++) {
-          const idx = sortedIndices[i]
-          const fr = indexToFilterResult.get(idx)
-          logDebug('[boss-auto-browse] 正在对 index=', idx, ' 点击"不感兴趣"（reason=', fr?.reason ?? 'unknown', '）')
-          try {
-            const niResult = await clickNotInterested(recommendFrame, idx, cursor, {
-              logPrefix: '[boss-auto-browse]',
-              filterResult: fr
-            })
-            if (niResult === 'NOT_INTERESTED_LIMIT_REACHED') {
-              notInterestedLimitReached = true
-              logInfo('[boss-auto-browse] 当天"不感兴趣"上限已达，本次及后续轮次将跳过，继续处理打招呼')
-              break
-            }
-            if (i < sortedIndices.length - 1) {
-              const [minMs, maxMs] = delayRange
-              const delay = minMs + Math.random() * (maxMs - minMs)
-              await sleep(delay)
-            }
-          } catch (e) {
-            logWarn('[boss-auto-browse] 点击不感兴趣失败（index=', idx, '）:', e?.message)
-          }
-        }
-      }
-
-      if (matched.length === 0) {
-        // 全被过滤掉，继续翻页/滚动加载下一批
-        logDebug('[boss-auto-browse] 本轮无匹配候选人，继续滚动加载…')
-        const hasMore = await scrollAndLoadMore(recommendFrame).catch(() => false)
-        if (!hasMore) {
-          logInfo('[boss-auto-browse] 已加载全部候选人，结束本次运行。')
-          break mainLoop
-        }
-        await sleepWithRandomDelay(1500)
-        continue
-      }
-
-      // c. 逐一处理匹配的候选人
-      for (let i = 0; i < matched.length; i++) {
-        const { candidate, originalIndex } = matched[i]
-
-        // 检查每日限额（在主页面检查）
-        const limitStatus = await checkDailyLimit(page).catch(() => ({ limitReached: false }))
-        if (limitStatus.limitReached) {
-          logInfo('[boss-auto-browse] 今日沟通人数已达上限，停止运行。')
-          break mainLoop
-        }
-
-        if (chatCount >= maxChatPerRun) {
-          logInfo(`[boss-auto-browse] 本次运行已开聊 ${chatCount} 人，达到上限，停止运行。`)
-          break mainLoop
-        }
-
-        // d. 开聊（在 iframe frame 内操作，弹窗处理在主页面）
-        logDebug('[boss-auto-browse] 开始处理候选人', candidate.geekName, '（index=', originalIndex, '）')
-        let procesResult
-        try {
-          procesResult = await processCandidate(
-            recommendFrame,
-            candidate,
-            config,
-            hooks,
-            { getInterceptedData, candidateIndex: originalIndex, mainPage: page }
-          )
-        } catch (procErr) {
-          logError('[boss-auto-browse] processCandidate 异常（', candidate.geekName, '）:', procErr.message)
-          continue
-        }
-
-        const { chatResult } = procesResult
-        if (chatResult.success) {
-          chatCount++
-          await hooks.onProgress?.promise?.({ phase: 'recommend', current: chatCount, max: maxChatPerRun }).catch(() => {})
-          logInfo('[boss-auto-browse] ✓ 已向', candidate.geekName, '发送招呼（本次共', chatCount, '人）')
-        } else {
-          logInfo('[boss-auto-browse] ✗', candidate.geekName, '开聊失败：', chatResult.reason)
-          if (chatResult.reason === 'DAILY_LIMIT_REACHED') {
-            break mainLoop
-          }
-          // 'RISK_CONTROL' 落到下面统一 checkpoint 处理
-        }
-
-        // 每位候选人处理完都做一次 checkpoint：检测到验证则在循环内等待用户完成，避免崩出 catch + 3s 重试导致连环触发
-        // 不传 expectedUrlPrefix：仅依赖 !detectRiskControl 判断完成，避免 URL query-params 导致误判超时
-        const cpStatus = await checkpointRiskControl(page, { log: logWarn })
-        if (cpStatus === 'timed-out') break mainLoop
-      }
-
-      // e. 滚动加载 / 翻页（在 iframe frame 内操作）
-      logDebug('[boss-auto-browse] 本轮匹配已处理完，滚动加载更多…')
-      const hasMore = await scrollAndLoadMore(recommendFrame).catch(() => false)
-      if (!hasMore) {
-        logInfo('[boss-auto-browse] 已加载全部候选人，结束本次运行。')
-        break mainLoop
-      }
-      await sleepWithRandomDelay(1500)
-    }
+    await runRecommendLoop(page, getRecommendFrame, hooks, recCfg, recLlmFn)
 
     await hooks.onComplete?.promise?.()
-    logInfo('[boss-auto-browse] 本次运行完成，共成功开聊', chatCount, '人。')
+    logInfo('[boss-auto-browse] 本次运行完成。')
 
     if (returnBrowser && browser && page) {
       return { browser, page }

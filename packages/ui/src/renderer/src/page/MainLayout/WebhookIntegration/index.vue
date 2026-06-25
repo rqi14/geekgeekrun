@@ -1,7 +1,7 @@
 <template>
   <div class="webhook-integration__wrap">
     <div class="main__wrap">
-      <el-form ref="formRef" :model="formContent" label-position="top">
+      <el-form :model="formContent" label-position="top">
         <!-- 基础设置 -->
         <el-card class="config-section">
           <el-form-item>
@@ -193,7 +193,6 @@ import { Delete } from '@element-plus/icons-vue'
 
 const { ipcRenderer } = electron
 
-const formRef = ref()
 const isSaving = ref(false)
 const isTesting = ref(false)
 const isTriggering = ref(false)

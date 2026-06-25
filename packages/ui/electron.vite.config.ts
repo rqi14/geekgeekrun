@@ -60,6 +60,8 @@ if (process.env.NODE_ENV) {
 export default defineConfig({
   main: {
     build: {
+      // 每次构建先清空 out/main，避免多次构建堆叠出哈希对不上的悬挂 chunk（如 local-storage-*.js 找不到）
+      emptyOutDir: true,
       rollupOptions: {
         external: []
       },
@@ -71,6 +73,7 @@ export default defineConfig({
   preload: {
     plugins: preloadPlugins,
     build: {
+      emptyOutDir: true,
       minify: process.env.NODE_ENV === 'development' ? undefined : 'terser',
       watch: process.env.NODE_ENV === 'development' ? {} : undefined
     }
@@ -83,6 +86,7 @@ export default defineConfig({
     },
     plugins: rendererPlugins,
     build: {
+      emptyOutDir: true,
       minify: process.env.NODE_ENV === 'development' ? undefined : 'terser'
     }
   }

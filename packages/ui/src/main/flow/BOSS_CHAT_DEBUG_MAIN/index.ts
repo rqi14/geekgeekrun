@@ -28,8 +28,8 @@ import { pipeWriteRegardlessError } from '../utils/pipe'
 const log = (msg: string) => console.log(`[boss-chat-debug-worker] ${msg}`)
 
 // 子进程侧：fd3=读（主进程发来的命令），fd4=写（回 READY/命令结果）
-const cmdReadStream = fs.createReadStream(null, { fd: 3 })
-const replyWriteStream = fs.createWriteStream(null, { fd: 4 })
+const cmdReadStream = fs.createReadStream(null as any, { fd: 3 })
+const replyWriteStream = fs.createWriteStream(null as any, { fd: 4 })
 
 const send = (obj: object) => {
   pipeWriteRegardlessError(replyWriteStream, JSON.stringify(obj) + '\n')

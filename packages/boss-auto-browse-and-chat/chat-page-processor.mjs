@@ -19,6 +19,7 @@ import {
 import { filterCandidates } from './candidate-processor.mjs'
 import { checkIfAlreadyContacted, saveCandidateInfo, logContact } from './data-manager.mjs'
 import { setLevel, debug as logDebug, info as logInfo, warn as logWarn } from './logger.mjs'
+import { filterFontTestLines } from './recommend/pure/resume-text.mjs'
 import {
   BOSS_CHAT_PAGE_URL,
   CHAT_PAGE_ACTIVE_NAME_SELECTOR,
@@ -112,21 +113,6 @@ function extractNameFromResumeText (text) {
 }
 
 /**
- * 去除 canvas 简历文本开头的字体渲染预热数据。
- * BOSS 在 iframe 首次加载时会把所有 ASCII 可打印字符逐一 fillText 做字形预热（"bzl|abcde..."），
- * 这些数据在 extractResumeText 排序后会出现在真正简历内容之前。
- * 定位到首个含 "活跃" 的行，之前的行全部丢弃。
- * @param {string[]} lines - extractResumeText 返回的行数组
- * @returns {string[]} 去除预热数据后的行数组
- */
-function filterFontTestLines (lines) {
-  const idx = lines.findIndex(line => line.includes('活跃'))
-  if (idx > 0) return lines.slice(idx)
-  // 兜底：丢弃不含任何汉字的行
-  return lines.filter(line => /[\u4e00-\u9fff]/.test(line))
-}
-
-/**
  * 使用 LLM 根据规则筛选简历。
  * 兼容 llm.json 为数组或 { configList } 格式，以及 providerCompleteApiUrl/providerApiSecret 字段名。
  * @param {string} resumeText - 简历全文
@@ -136,33 +122,23 @@ function filterFontTestLines (lines) {
 export async function screenCandidateWithLlm (resumeText, llmRule) {
   const defaultResult = { pass: true, reason: 'LLM 调用失败，默认通过' }
   try {
-    const { getEnabledLlmClient } = await import('./llm-rubric.mjs')
-    const client = getEnabledLlmClient()
-    if (!client) return defaultResult
-
-    const { completes } = await import('@geekgeekrun/utils/gpt-request.mjs')
+    const { readBossLlmConfig } = await import('./runtime-file-utils.mjs')
+    const { chatCompleteForPurpose } = await import('./llm/failover.mjs')
+    const config = readBossLlmConfig()
     const systemContent = `你是一个招聘筛选助手。根据以下筛选规则，判断候选人简历是否符合要求。
 筛选规则：${llmRule || '无'}
 请仅以JSON格式回复，不要包含其他内容。格式：{"pass": true或false, "reason": "判断理由"}`
-    const completion = await completes(
-      {
-        baseURL: client.baseURL,
-        apiKey: client.apiKey,
-        model: client.model,
-        max_tokens: 200
-      },
-      [
-        { role: 'system', content: systemContent },
-        { role: 'user', content: (resumeText || '（无简历内容）').slice(0, 3500) }
-      ]
-    )
-    const raw = completion?.choices?.[0]?.message?.content?.trim()
-    if (!raw) return defaultResult
-    const jsonStr = raw.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
-    const parsed = JSON.parse(jsonStr)
-    const pass = !!parsed.pass
-    const reason = typeof parsed.reason === 'string' ? parsed.reason : ''
-    return { pass, reason }
+    const schema = {
+      name: 'screen',
+      schema: { type: 'object', required: ['pass'], properties: { pass: { type: 'boolean' }, reason: { type: 'string' } } }
+    }
+    const r = await chatCompleteForPurpose(config, 'resume_screening', [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: (resumeText || '（无简历内容）').slice(0, 3500) }
+    ], { schema, maxOutputTokens: 200 })
+    const parsed = r?.parsed
+    if (!parsed) return defaultResult
+    return { pass: !!parsed.pass, reason: typeof parsed.reason === 'string' ? parsed.reason : '' }
   } catch (err) {
     logWarn(`${LOG} screenCandidateWithLlm 失败:`, err.message)
     return defaultResult
