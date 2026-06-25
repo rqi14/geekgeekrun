@@ -60,7 +60,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     view: Math.min(cfg.maxViewPerRun ?? Infinity, liveView ?? cfg.maxViewPerRun ?? 20),
     x: cfg.maxXPerRun
   }
-  if (budgets.greet <= 0 || budgets.view <= 0) return
+  // dry-run 不真打招呼，不受真实 greet/view 额度限制（onlyViewed 时重看已看过的人也不烧查看）
+  if (!cfg.dryRun && (budgets.greet <= 0 || budgets.view <= 0)) return
 
   // Layer-0 服务端预筛（操作基座）：设一次原生筛选面板，改变"推谁"。enabled=false→plan 空→no-op。
   if (cfg.nativeFilter?.enabled) {
