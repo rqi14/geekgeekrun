@@ -264,8 +264,25 @@ export const getMergedJobConfig = (jobId) => {
   candidateFilter.schoolFloorRank = jobFilter?.schoolFloorRank ?? candidateFilterConfig.schoolFloorRank
   const chatPageFilter = jobFilterToChatPageFilter(jobFilter)
 
+  // 统一：职位的 AI Rubric（resumeLlmConfig）同时驱动推荐页精评，不必在推荐页面板再配一遍。
+  // 选了职位且开了 rubric → 用 per-job rubric；否则回退全局 boss-recruiter.json 的 scoring（推荐页面板）。
+  const llm = jobFilter?.resumeLlmConfig
+  const hasJobRubric =
+    jobFilter?.resumeLlmEnabled && Array.isArray(llm?.rubric?.dimensions) && llm.rubric.dimensions.length > 0
+  const scoring = hasJobRubric
+    ? {
+        enabled: true,
+        rubric: { ...llm.rubric, passThreshold: llm.passThreshold },
+        minScoreToChat:
+          typeof llm.passThreshold === 'number' ? llm.passThreshold : (recruiterConfig.scoring?.minScoreToChat ?? 0),
+        onScoreError: recruiterConfig.scoring?.onScoreError ?? 'skip',
+        modelId: llm.rubricGenerationModelId ?? recruiterConfig.scoring?.modelId ?? null
+      }
+    : recruiterConfig.scoring
+
   return {
     ...recruiterConfig,
+    scoring,
     candidateFilter,
     chatPage: {
       ...(recruiterConfig.chatPage || {}),
