@@ -84,7 +84,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RunningOverlay from '@renderer/features/RunningOverlay/index.vue'
 import { RUNNING_STATUS_ENUM } from '../../../../../common/enums/auto-start-chat'
@@ -135,6 +135,27 @@ const applyState = (next: RecommendConfigState) => {
   Object.assign(state.run, next.run)
 }
 
+// 仅刷新职位下拉（参考数据），不动用户正在编辑的表单 state；mount + 每次切回页面都拉一次
+const loadJobs = async () => {
+  try {
+    const jobsConfig = await ipcRenderer.invoke('fetch-boss-jobs-config')
+    const list = jobsConfig?.jobs ?? []
+    jobs.value = list.map((j: { jobId?: string; id?: string; jobName?: string; name?: string }) => ({
+      jobId: j.jobId ?? j.id ?? '',
+      jobName: j.jobName ?? j.name ?? j.jobId ?? j.id ?? ''
+    }))
+    sequenceJobsEnabled.value = Array.isArray(list)
+      ? list.some((j: { sequence?: { enabled?: boolean } }) => j?.sequence?.enabled === true)
+      : false
+  } catch (err) {
+    console.error('[RecommendAutomation] 拉取职位列表失败', err)
+  }
+}
+
+onActivated(() => {
+  loadJobs()
+})
+
 onMounted(async () => {
   try {
     const { state: loadedState, sequenceJobsEnabled: seq } = await loadRecommendConfig()
@@ -152,15 +173,7 @@ onMounted(async () => {
   } catch (err) {
     console.error('[RecommendAutomation] 拉取模型失败', err)
   }
-  try {
-    const jobsConfig = await ipcRenderer.invoke('fetch-boss-jobs-config')
-    jobs.value = (jobsConfig?.jobs ?? []).map((j: { jobId?: string; id?: string; jobName?: string; name?: string }) => ({
-      jobId: j.jobId ?? j.id ?? '',
-      jobName: j.jobName ?? j.name ?? j.jobId ?? j.id ?? ''
-    }))
-  } catch (err) {
-    console.error('[RecommendAutomation] 拉取职位列表失败', err)
-  }
+  await loadJobs()
 })
 
 const doSave = async () => {

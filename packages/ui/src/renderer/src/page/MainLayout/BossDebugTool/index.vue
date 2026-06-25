@@ -483,7 +483,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { ref, nextTick, onMounted, onActivated, onUnmounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
@@ -601,7 +601,7 @@ ipcRenderer.on('boss-recommend-debug-exited', () => {
   addLog('推荐页浏览器已关闭', 'err')
 })
 
-onMounted(async () => {
+const loadAllJobs = async () => {
   try {
     const result = await ipcRenderer.invoke('fetch-boss-jobs-config')
     allJobs.value = (result?.jobs ?? []).map((j: any) => ({
@@ -612,7 +612,11 @@ onMounted(async () => {
   } catch {
     // 忽略
   }
-})
+}
+
+onMounted(loadAllJobs)
+// KeepAlive：每次切回调试工具都重新拉职位（同步/改职位后保持最新）
+onActivated(loadAllJobs)
 
 onUnmounted(() => {
   ipcRenderer.removeAllListeners('boss-chat-debug-exited')
