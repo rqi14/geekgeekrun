@@ -1,3 +1,10 @@
+const {
+  buildUtf8ProcessEnv,
+  normalizeProcessTextEncoding
+} = require('../utils/process-text-encoding.cjs')
+
+normalizeProcessTextEncoding()
+
 // 如果是通过 Electron 运行，禁用 GUI 和 Dock 图标
 if (typeof require !== 'undefined') {
   try {
@@ -47,6 +54,16 @@ const userProcessClients = new Set(); // GUI客户端连接集合
 const stoppedWorkers = new Set(); // 被用户主动停止的workerId集合，用于防止竞态条件
 const pidToProcessInfoMap = new Map()
 const socketToWorkerIdSetMap = new WeakMap()
+const pendingRestartTimers = new Map()
+
+function getRunRecordIdFromArgs(args = []) {
+  const runRecordArg = args.find(arg => typeof arg === 'string' && arg.startsWith('--run-record-id='))
+  if (!runRecordArg) {
+    return undefined
+  }
+  const value = Number(runRecordArg.slice('--run-record-id='.length))
+  return Number.isFinite(value) ? value : undefined
+}
 
 // 创建TCP服务器
 const server = net.createServer((socket) => {
@@ -190,6 +207,12 @@ function handleMessage(socket, message) {
         args,
         env
       } = message
+      const pendingRestartTimer = pendingRestartTimers.get(workerId);
+      if (pendingRestartTimer) {
+        clearTimeout(pendingRestartTimer);
+        pendingRestartTimers.delete(workerId);
+        stoppedWorkers.delete(workerId);
+      }
       if (workers.has(workerId)) {
         console.log(`工具进程 ${workerId} 已在运行`);
         return;
@@ -256,12 +279,12 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
   // 添加参数使工具进程在后台运行，不显示 UI
   const workerProcess = spawn(command, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
+    env: buildUtf8ProcessEnv({
       ...process.env,
       ...env,
       GEEKGEEKRUND_WORKER_ID: workerId,
       GEEKGEEKRUND_RESTART_COUNT: restartCount.toString(),
-    }
+    })
   });
 
   let output = '';
@@ -297,7 +320,8 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
         code: code,
         signal: signal,
         restarting: shouldRestart && !stoppedWorkers.has(workerId),
-        restartCount: restartCount
+        restartCount: restartCount,
+        runRecordId: workerInfo.runRecordId
       });
       
       // 如果进程意外退出（非正常停止），且不在停止列表中，自动重启
@@ -305,7 +329,8 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
         console.log(`工具进程 ${workerId} 意外退出，准备重启 (第${restartCount}次)`);
         
         // 延迟重启，避免频繁重启
-        setTimeout(() => {
+        const restartTimer = setTimeout(() => {
+          pendingRestartTimers.delete(workerId);
           // 再次检查：确保worker不在停止列表中，且当前没有运行
           if (!workers.has(workerId) && !stoppedWorkers.has(workerId)) {
             startWorker({ workerId, command, args, env }, restartCount);
@@ -319,10 +344,12 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
               code: code,
               signal: signal,
               restarting: false,
-              restartCount: restartCount
+              restartCount: restartCount,
+              runRecordId: workerInfo.runRecordId
             });
           }
         }, 2000);
+        pendingRestartTimers.set(workerId, restartTimer);
       } else if (stoppedWorkers.has(workerId)) {
         // 如果是在停止列表中，清理标记
         console.log(`工具进程 ${workerId} 已停止，清理停止标记`);
@@ -355,6 +382,7 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
     args,
     env,
     workerId,
+    runRecordId: getRunRecordIdFromArgs(args),
   }
   workers.set(workerId, workerInfo);
   pidToProcessInfoMap.set(workerProcess.pid, workerInfo);
@@ -365,12 +393,17 @@ function startWorker({ workerId, command, args, env }, restartCount = 0) {
 // 停止工具进程
 function stopWorker(workerId) {
   const workerInfo = workers.get(workerId);
+  const hasPendingRestart = pendingRestartTimers.has(workerId);
   
   // 无论workerInfo是否存在，都添加到停止列表，防止竞态条件
-  stoppedWorkers.add(workerId);
-  console.log(`停止工具进程: ${workerId} (已添加到停止列表)`);
+  if (workerInfo || hasPendingRestart) {
+    stoppedWorkers.add(workerId);
+    console.log(`停止工具进程: ${workerId} (已添加到停止列表)`);
+  } else {
+    console.log(`停止工具进程: ${workerId} (当前没有运行或待重启进程)`);
+  }
   if (!workerInfo) {
-    console.log(`工具进程 ${workerId} 不存在，但已标记为停止（防止重启）`);
+    console.log(`工具进程 ${workerId} 不存在${hasPendingRestart ? '，但已标记为停止以取消待重启任务' : ''}`);
     // 通知GUI客户端
     broadcastToGUI({
       type: 'worker-disconnected',
@@ -382,20 +415,21 @@ function stopWorker(workerId) {
     return;
   }
   
+  if (workerInfo.status === 'stopping') {
+    console.log(`工具进程 ${workerId} 已在停止中`);
+    broadcastStatus();
+    return;
+  }
+
+  workerInfo.status = 'stopping';
+
   // 关闭工具进程的TCP连接
   if (workerInfo.socket) {
     workerInfo.socket.destroy();
+    workerInfo.socket = null;
   }
   
   workerInfo.process.kill('SIGTERM');
-  workers.delete(workerId);
-  
-  // 通知GUI客户端
-  broadcastToGUI({
-    type: 'worker-disconnected',
-    workerId: workerId,
-    message: `工具进程 ${workerId} 已断开`
-  });
   
   // 延迟发送状态更新
   setTimeout(() => broadcastStatus(), 500);
@@ -415,6 +449,7 @@ function getWorkersStatus() {
       // lastHeartbeat: workerInfo.lastHeartbeat,
       command: workerInfo.command,
       args: workerInfo.args,
+      runRecordId: workerInfo.runRecordId,
       pid: workerInfo.process?.pid,
       // 最新截图（通常是 data URL 或 base64 字符串），以及截图时间
       screenshot: workerInfo.latestScreenshot ?? null,

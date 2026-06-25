@@ -3,6 +3,7 @@ import { AUTO_CHAT_ERROR_EXIT_CODE } from '../../common/enums/auto-start-chat'
 import { daemonEE, sendToDaemon } from '../flow/OPEN_SETTING_WINDOW/connect-to-daemon'
 import { saveAndGetCurrentRunRecord } from '../flow/OPEN_SETTING_WINDOW/utils/db'
 import minimist from 'minimist'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 
 export async function runCommon({ mode, jobId }: { mode: string; jobId?: string | null }) {
   await sendToDaemon(
@@ -53,13 +54,13 @@ export async function runCommon({ mode, jobId }: { mode: string; jobId?: string 
       workerId: mode,
       command: process.argv[0],
       args,
-      env: subProcessEnv
+      env: buildUtf8ProcessEnv(subProcessEnv)
     },
     {
       needCallback: true
     }
   )
-  daemonEE.on('message', (message) => {
+  daemonEE.on('message', function handler(message) {
     if (message.type === 'worker-exited') {
       if (
         message.workerId === mode &&
@@ -67,6 +68,9 @@ export async function runCommon({ mode, jobId }: { mode: string; jobId?: string 
         globalThis.GEEKGEEKRUN_PROCESS_ROLE !== 'ui'
       ) {
         process.exit(0)
+      }
+      if (message.workerId === mode && !message.restarting) {
+        daemonEE.off('message', handler)
       }
     }
   })

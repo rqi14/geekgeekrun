@@ -7,6 +7,7 @@ import * as fs from 'node:fs'
 import { cacheDir } from '../constant'
 import { EXPECT_CHROMIUM_BUILD_ID } from '../../common/constant'
 import * as puppeteerManager from '@puppeteer/browsers'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 
 export let browserDownloadProgressWindow: BrowserWindow | null = null
 
@@ -66,6 +67,7 @@ export function createBrowserDownloadProgressWindow(
         ? [process.argv[1], `--mode=downloadDependenciesForInit`]
         : [`--mode=downloadDependenciesForInit`],
       {
+        env: buildUtf8ProcessEnv(process.env),
         stdio: [null, null, null, 'pipe', 'ipc']
       }
     )
