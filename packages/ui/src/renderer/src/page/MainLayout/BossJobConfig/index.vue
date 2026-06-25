@@ -235,6 +235,9 @@
 
             <div class="filter-row resume-module-row">
               <el-checkbox v-model="job.filter.resumeLlmEnabled" label="大模型筛选（AI Rubric）" />
+              <el-tag size="small" type="success" style="margin-left: 8px"
+                >此 Rubric 同时用于推荐牛人页精评（沟通页关键词/正则仍仅沟通页生效）</el-tag
+              >
             </div>
             <div v-if="job.filter.resumeLlmEnabled" class="resume-module-content llm-rubric-panel">
               <!-- Step 1: AI Rubric Builder -->
