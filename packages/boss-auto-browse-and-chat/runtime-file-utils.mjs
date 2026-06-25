@@ -259,6 +259,9 @@ export const getMergedJobConfig = (jobId) => {
 
   const jobFilter = jobEntry.filter
   const candidateFilter = jobFilterToCandidateFilter(jobFilter)
+  // fieldRules/schoolFloorRank 暂无 per-job UI：优先职位 filter 自带，否则回退全局 candidate-filter.json
+  candidateFilter.fieldRules = jobFilter?.fieldRules ?? candidateFilterConfig.fieldRules
+  candidateFilter.schoolFloorRank = jobFilter?.schoolFloorRank ?? candidateFilterConfig.schoolFloorRank
   const chatPageFilter = jobFilterToChatPageFilter(jobFilter)
 
   return {
