@@ -73,13 +73,13 @@ const checkForBossVerification = async (page: any): Promise<boolean> => {
  */
 const waitForBossVerificationCompletion = async (page: any, expectedUrlPrefix: string, logFn: (msg: string) => void): Promise<boolean> => {
   logFn('⚠️  检测到 BOSS 安全验证，请在浏览器窗口中手动完成验证，完成后将自动继续...')
-  try {
-    const { Notification } = await import('electron')
-    new Notification({
-      title: 'GeekGeekRun - 需要人工验证',
-      body: '检测到 BOSS 直聘安全验证，请在打开的浏览器窗口中完成验证，完成后程序将自动继续。'
-    }).show()
-  } catch { /* Notification 不可用时静默忽略 */ }
+  const { showManualVerificationAlert } = (await import(
+    '@geekgeekrun/boss-auto-browse-and-chat/manual-verification-alert.mjs'
+  )) as any
+  await showManualVerificationAlert({
+    key: 'boss-chat-page-main',
+    logger: logFn
+  })
 
   const deadline = Date.now() + 5 * 60 * 1000
   while (Date.now() < deadline) {
