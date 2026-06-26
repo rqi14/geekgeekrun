@@ -21,9 +21,13 @@ export async function score(merged, resume, cfg, llmFn) {
     llm = null
     llmThrew = true
   }
-  const result = mergeScore({ result: 'pass' }, llm, cfg)
-  // llmError：调用抛错 或 评分器内部兜底（限流/解析失败）→ 标记给上层重试队列判定
-  if (llmThrew || llm?.llmError === true) result.llmError = true
+  // llmError：调用抛错 或 评分器内部兜底（限流/解析失败）。两者一律按「LLM 失败」走 mergeScore 的
+  // null 分支，由 onScoreError 决定分数：skip → minScoreToChat-1（必定低于门槛，fail-closed，不论 minScoreToChat
+  // 取值都不会被误打招呼）；greetIfRulePass → minScoreToChat（允许 LLM 失败时按规则放行）。
+  // llmError 标记仍保留，供并发重试队列判定与失败弹窗聚合。
+  const errored = llmThrew || llm?.llmError === true
+  const result = mergeScore({ result: 'pass' }, errored ? null : llm, cfg)
+  if (errored) result.llmError = true
   return result
 }
 
