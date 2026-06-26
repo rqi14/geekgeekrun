@@ -28,6 +28,26 @@ test('LLM returns null → treated as error path', async () => {
   const r = await score({ education: '硕士' }, { summary: 's' }, cfg, fakeLlm)
   assert.ok(r.score < 60)
 })
+test('llmError 透传：LLM 抛错 → result.llmError=true（供重试队列判定）', async () => {
+  const fakeLlm = async () => { throw new Error('429 rate limit') }
+  const r = await score({ education: '硕士' }, { summary: 's' }, cfg, fakeLlm)
+  assert.equal(r.llmError, true)
+})
+test('llmError 透传：LLM 返回 llmError 标记 → result.llmError=true', async () => {
+  const fakeLlm = async () => ({ score: 0, reason: '兜底', llmError: true })
+  const r = await score({ education: '硕士' }, { summary: 's' }, cfg, fakeLlm)
+  assert.equal(r.llmError, true)
+})
+test('llmError 透传：正常评分不带 llmError', async () => {
+  const fakeLlm = async () => ({ score: 80, reason: 'ok' })
+  const r = await score({ education: '硕士' }, { summary: 's' }, cfg, fakeLlm)
+  assert.notEqual(r.llmError, true)
+})
+test('llmError 透传：LLM 返回 null（无 rubric）不算 llmError（不重试）', async () => {
+  const fakeLlm = async () => null
+  const r = await score({ education: '硕士' }, { summary: 's' }, cfg, fakeLlm)
+  assert.notEqual(r.llmError, true)
+})
 test('buildResumeText includes degree and summary', () => {
   const t = buildResumeText({ geekName: '甲', education: '硕士', tags: ['QS前500'] }, { summary: '浙大 硕士' })
   assert.match(t, /硕士/)

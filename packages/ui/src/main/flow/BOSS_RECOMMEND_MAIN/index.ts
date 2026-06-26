@@ -108,7 +108,8 @@ const runRecommend = async () => {
     afterChatStarted: new AsyncSeriesHook(['candidate', 'result'] as any),
     onError: new AsyncSeriesHook(['error']),
     onComplete: new AsyncSeriesHook(['_']),
-    onProgress: new AsyncSeriesHook(['payload'] as any)
+    onProgress: new AsyncSeriesHook(['payload'] as any),
+    onScoreError: new AsyncSeriesHook(['payload'] as any)
   }
 
   await initPlugins(hooks)
@@ -146,6 +147,24 @@ const runRecommend = async () => {
         phase: p?.phase,
         current: p?.current ?? 0,
         max: p?.max ?? 0
+      }
+    })
+  })
+
+  hooks.onScoreError.tapPromise('sendScoreErrorToGui', async (payload: unknown) => {
+    const p = payload as { failedCount?: number; total?: number; names?: string[] }
+    const failedCount = p?.failedCount ?? 0
+    const names = Array.isArray(p?.names) ? p.names : []
+    const nameHint = names.length ? `（${names.slice(0, 5).join('、')}${names.length > 5 ? '…' : ''}）` : ''
+    log(`onScoreError - 本轮 ${failedCount} 人评分失败${nameHint}`)
+    sendToDaemon({
+      type: 'worker-to-gui-message',
+      data: {
+        type: 'boss-auto-browse-notice',
+        level: 'warning',
+        workerId: 'bossRecommendMain',
+        runRecordId,
+        message: `本轮 ${failedCount} 人简历评分失败（限流/网络），已按 0 分跳过、不会误打招呼${nameHint}`
       }
     })
   })

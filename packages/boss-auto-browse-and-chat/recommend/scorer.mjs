@@ -13,13 +13,18 @@ export async function score(merged, resume, cfg, llmFn) {
   const gate = ruleGate(merged, cfg.rules || {})
   if (gate.result === 'hardReject') return mergeScore(gate, null, cfg)
   let llm = null
+  let llmThrew = false
   try {
     const fn = llmFn || defaultLlm
     llm = await fn({ candidate: merged, resume, llmCfg: cfg.llm || {} })
   } catch (e) {
     llm = null
+    llmThrew = true
   }
-  return mergeScore({ result: 'pass' }, llm, cfg)
+  const result = mergeScore({ result: 'pass' }, llm, cfg)
+  // llmError：调用抛错 或 评分器内部兜底（限流/解析失败）→ 标记给上层重试队列判定
+  if (llmThrew || llm?.llmError === true) result.llmError = true
+  return result
 }
 
 /**
@@ -33,7 +38,11 @@ export async function defaultLlm({ candidate, resume, llmCfg }) {
   const resumeText = buildResumeText(candidate, resume)
   const r = await evaluateResumeByRubric(resumeText, rubric, { modelId: llmCfg?.modelId ?? null })
   if (!r) return null
-  return { score: typeof r.totalScore === 'number' ? r.totalScore : 0, reason: r.reason ?? '' }
+  return {
+    score: typeof r.totalScore === 'number' ? r.totalScore : 0,
+    reason: r.reason ?? '',
+    llmError: r.llmError === true
+  }
 }
 
 /** 把列表字段 + 简历概览拼成喂给评分器的简历文本 */

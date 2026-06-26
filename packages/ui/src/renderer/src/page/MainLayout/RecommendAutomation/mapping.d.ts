@@ -24,9 +24,12 @@ export interface FilterState {
 export interface BudgetState {
   waveSize: number
   maxGreetPerRun: number
+  maxViewPerRun: number
   maxXPerRun: number
   maxScrollSteps: number
   maxStaleWaves: number
+  scoreConcurrency: number
+  scoreMaxAttempts: number
   scrollDelayMsRange: [number, number]
   delayBetweenActionsMs: [number, number]
 }

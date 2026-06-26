@@ -86,6 +86,7 @@ import {
   RUNNING_STATUS_ENUM
 } from '../../../../common/enums/auto-start-chat'
 import { gtagRenderer } from '@renderer/utils/gtag'
+import { ElNotification } from 'element-plus'
 const props = defineProps({
   workerId: {
     type: String
@@ -206,6 +207,20 @@ function messageHandler(ev, { data }) {
     } else if (data.phase === 'chatPage') {
       bossProgress.value.chatPage = { current: data.current ?? 0, max: data.max ?? 0 }
     }
+    return
+  }
+  if (
+    data.type === 'boss-auto-browse-notice' &&
+    data.workerId === props.workerId &&
+    (data.runRecordId == null || data.runRecordId === props.runRecordId)
+  ) {
+    ElNotification({
+      title: '评分提醒',
+      message: data.message,
+      type: data.level === 'warning' ? 'warning' : 'info',
+      duration: 0,
+      position: 'top-right'
+    })
     return
   }
   if (data.type !== 'prerequisite-step-by-step-check' || data.runRecordId !== props.runRecordId) {

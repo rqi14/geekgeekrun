@@ -31,7 +31,8 @@ async function callLayer (config, purpose, messages, opts) {
  * @returns {Promise<{ isPassed: boolean, totalScore: number, reason: string }>} 失败时默认通过
  */
 export async function evaluateResumeByRubric (resumeText, rubricConfig, options = {}) {
-  const defaultResult = { isPassed: true, totalScore: 0, reason: 'LLM 调用失败，默认通过' }
+  // llmError=true：调用/解析失败的兜底标记，供上层重试判定（真实评估结果不带此标记）
+  const defaultResult = { isPassed: true, totalScore: 0, reason: 'LLM 调用失败，默认通过', llmError: true }
   // options.modelId：用户显式选定模型，置于 failover 链首（仍保留其余模型兜底）
   const preferModelId = typeof options?.modelId === 'string' ? options.modelId : null
   const knockouts = Array.isArray(rubricConfig?.knockouts) ? rubricConfig.knockouts : []
