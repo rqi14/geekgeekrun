@@ -4,9 +4,12 @@
 export const DEFAULTS = {
   waveSize: 6,
   maxGreetPerRun: 10,
+  maxViewPerRun: 20,
   maxXPerRun: 10,
   maxScrollSteps: 6,
   maxStaleWaves: 2,
+  scoreConcurrency: 4,
+  scoreMaxAttempts: 3,
   scrollDelayMsRange: [800, 2000],
   delayBetweenActionsMs: [1500, 4000],
   minScoreToChat: 0,
@@ -52,9 +55,12 @@ export function normalizeRecommendConfig(raw) {
     budget: {
       waveSize: num(rp.waveSize, DEFAULTS.waveSize),
       maxGreetPerRun: num(rp.maxGreetPerRun, DEFAULTS.maxGreetPerRun),
+      maxViewPerRun: num(rp.maxViewPerRun, DEFAULTS.maxViewPerRun),
       maxXPerRun: num(rp.maxXPerRun, DEFAULTS.maxXPerRun),
       maxScrollSteps: num(rp.maxScrollSteps, DEFAULTS.maxScrollSteps),
       maxStaleWaves: num(rp.maxStaleWaves, DEFAULTS.maxStaleWaves),
+      scoreConcurrency: num(rp.scoreConcurrency, DEFAULTS.scoreConcurrency),
+      scoreMaxAttempts: num(rp.scoreMaxAttempts, DEFAULTS.scoreMaxAttempts),
       scrollDelayMsRange: sortedRange(rp.scrollDelayMsRange, DEFAULTS.scrollDelayMsRange),
       delayBetweenActionsMs: sortedRange(rp.delayBetweenActionsMs, DEFAULTS.delayBetweenActionsMs)
     },
@@ -87,9 +93,12 @@ export function toSavePayload(s) {
     recommendPage: {
       waveSize: s.budget.waveSize,
       maxGreetPerRun: s.budget.maxGreetPerRun,
+      maxViewPerRun: s.budget.maxViewPerRun,
       maxXPerRun: s.budget.maxXPerRun,
       maxScrollSteps: s.budget.maxScrollSteps,
       maxStaleWaves: s.budget.maxStaleWaves,
+      scoreConcurrency: s.budget.scoreConcurrency,
+      scoreMaxAttempts: s.budget.scoreMaxAttempts,
       scrollDelayMsRange: s.budget.scrollDelayMsRange,
       delayBetweenActionsMs: s.budget.delayBetweenActionsMs,
       clickNotInterestedForFiltered: s.run.clickNotInterestedForFiltered,

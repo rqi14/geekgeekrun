@@ -38,6 +38,27 @@ test('toSavePayload round-trips key names the IPC + orchestrator expect', () => 
   assert.equal(p.scoring.jd, 'JD here')
   assert.equal(p.recommendPage.maxGreetPerRun, 2)
 })
+test('scoreConcurrency/scoreMaxAttempts/maxViewPerRun: defaults + round-trip', () => {
+  const empty = normalizeRecommendConfig({ 'boss-recruiter.json': {}, 'candidate-filter.json': {} })
+  assert.equal(empty.budget.scoreConcurrency, DEFAULTS.scoreConcurrency)
+  assert.equal(empty.budget.scoreMaxAttempts, DEFAULTS.scoreMaxAttempts)
+  assert.equal(empty.budget.maxViewPerRun, DEFAULTS.maxViewPerRun)
+
+  const s = normalizeRecommendConfig({
+    'boss-recruiter.json': {
+      recommendPage: { scoreConcurrency: 2, scoreMaxAttempts: 5, maxViewPerRun: 8 }
+    },
+    'candidate-filter.json': {}
+  })
+  assert.equal(s.budget.scoreConcurrency, 2)
+  assert.equal(s.budget.scoreMaxAttempts, 5)
+  assert.equal(s.budget.maxViewPerRun, 8)
+
+  const p = toSavePayload(s)
+  assert.equal(p.recommendPage.scoreConcurrency, 2)
+  assert.equal(p.recommendPage.scoreMaxAttempts, 5)
+  assert.equal(p.recommendPage.maxViewPerRun, 8)
+})
 test('clamps ranges (min<=max)', () => {
   const s = normalizeRecommendConfig({
     'boss-recruiter.json': {},

@@ -13,13 +13,22 @@ export async function score(merged, resume, cfg, llmFn) {
   const gate = ruleGate(merged, cfg.rules || {})
   if (gate.result === 'hardReject') return mergeScore(gate, null, cfg)
   let llm = null
+  let llmThrew = false
   try {
     const fn = llmFn || defaultLlm
     llm = await fn({ candidate: merged, resume, llmCfg: cfg.llm || {} })
   } catch (e) {
     llm = null
+    llmThrew = true
   }
-  return mergeScore({ result: 'pass' }, llm, cfg)
+  // llmError：调用抛错 或 评分器内部兜底（限流/解析失败）。两者一律按「LLM 失败」走 mergeScore 的
+  // null 分支，由 onScoreError 决定分数：skip → minScoreToChat-1（必定低于门槛，fail-closed，不论 minScoreToChat
+  // 取值都不会被误打招呼）；greetIfRulePass → minScoreToChat（允许 LLM 失败时按规则放行）。
+  // llmError 标记仍保留，供并发重试队列判定与失败弹窗聚合。
+  const errored = llmThrew || llm?.llmError === true
+  const result = mergeScore({ result: 'pass' }, errored ? null : llm, cfg)
+  if (errored) result.llmError = true
+  return result
 }
 
 /**
@@ -33,7 +42,11 @@ export async function defaultLlm({ candidate, resume, llmCfg }) {
   const resumeText = buildResumeText(candidate, resume)
   const r = await evaluateResumeByRubric(resumeText, rubric, { modelId: llmCfg?.modelId ?? null })
   if (!r) return null
-  return { score: typeof r.totalScore === 'number' ? r.totalScore : 0, reason: r.reason ?? '' }
+  return {
+    score: typeof r.totalScore === 'number' ? r.totalScore : 0,
+    reason: r.reason ?? '',
+    llmError: r.llmError === true
+  }
 }
 
 /** 把列表字段 + 简历概览拼成喂给评分器的简历文本 */

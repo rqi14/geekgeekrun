@@ -60,7 +60,7 @@ const runDebug = async () => {
   const { setupCanvasTextHook } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/resume-extractor.mjs'
   )) as any
-  const { scrollGently } = (await import(
+  const { scrollGently, greetFromCard } = (await import(
     '@geekgeekrun/boss-auto-browse-and-chat/recommend/actions.mjs'
   )) as any
   const { detectState } = (await import(
@@ -257,6 +257,17 @@ const runDebug = async () => {
           if (!frame) { reply(false, null, '未找到 recommendFrame'); break }
           const greeted = await greetInModal(frame, cursor)
           reply(greeted, { greeted })
+          break
+        }
+
+        case 'greet-from-card': {
+          // 真机冒烟：走编排器真实打招呼路径 greetFromCard（点列表卡片 button.btn-greet → 确认弹窗
+          // div.dialog-wrap button.btn-sure-v2）。一次只打一个 encryptGeekId，爆炸半径恒为 1。不可逆。
+          if (!frame) { reply(false, null, '未找到 recommendFrame'); break }
+          const { encryptGeekId } = cmd
+          if (!encryptGeekId) { reply(false, null, '缺少 encryptGeekId'); break }
+          const r = await greetFromCard(page, frame, cursor, encryptGeekId)
+          reply(!!r?.greeted, { ...r })
           break
         }
 

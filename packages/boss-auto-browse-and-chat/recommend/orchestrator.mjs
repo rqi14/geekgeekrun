@@ -11,7 +11,7 @@ import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
 import { readQuota } from './quota-reader.mjs'
 import { rankForOpen, selectForGreet } from './pure/selection.mjs'
-import { createPool } from './pure/concurrency.mjs'
+import { createRetryingPool } from './pure/concurrency.mjs'
 import { planNativeFilter } from './pure/native-filter.mjs'
 import { applyNativeFilter } from './native-filter-driver.mjs'
 import { fieldKnockout } from './pure/field-knockout.mjs'
@@ -158,7 +158,14 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   // ---------- B 相：串行抽简历（烧查看额度）+ 并发评分 ----------
   // 浏览器抽取必须串行（单页面）；但每抽到一份简历就把 LLM 评分丢进并发池后台跑，
   // 抽下一份时上一份正在评分，把 N×(抽+评) 串行压成 ~抽取墙钟 + 末尾评分。
-  const scheduleScore = createPool(cfg.scoreConcurrency ?? 4)
+  // 评分并发池 + 有界自动重试：评分撞限流/网络/解析失败（llmError）→ 重新入队重试，
+  // 最多 scoreMaxAttempts 次，退避 2s/4s…（退避期间释放并发槽）；用尽仍失败 → 落 0 分(fail-closed)。
+  const scheduleScore = createRetryingPool({
+    concurrency: cfg.scoreConcurrency ?? 4,
+    maxAttempts: Math.max(1, cfg.scoreMaxAttempts ?? 3),
+    shouldRetry: (entry) => entry?.llmError === true,
+    backoffMs: (attempt) => Math.min(15000, 2000 * attempt)
+  })
   const scoringTasks = []
   let opened = 0
   for (const c of openSet) {
@@ -196,7 +203,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     // 评分只调 LLM、不碰浏览器，进并发池后台跑；闭包捕获的是已抽好的快照字符串，
     // 与下一份的 clearCapturedText/captureResumeText 不冲突。
     scoringTasks.push(
-      scheduleScore(async () => {
+      scheduleScore(async (attempt) => {
+        if (attempt > 1) console.warn(`[recommend] 评分重试 ${c.geekName}（第 ${attempt} 次）`)
         const s = await score(c, resume, cfg, llmFn)
         return {
           candidate: c,
@@ -204,7 +212,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
           hardReject: s.hardReject,
           reason: canvasOk ? s.reason : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
           resumeChars: (fullText || '').length,
-          canvasOk
+          canvasOk,
+          llmError: s.llmError === true
         }
       })
     )
@@ -216,6 +225,18 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   // 等所有并发评分落地（score() 内部已吞 LLM 异常；allSettled 再兜一层，异常项丢弃）
   const settled = await Promise.allSettled(scoringTasks)
   const scored = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value)
+
+  // 评分失败（重试用尽仍 llmError）聚合成一条通知 → GUI 弹窗提示用户（这些人按 0 分 fail-closed，不会误打招呼）
+  const scoreFailed = scored.filter((s) => s.llmError === true)
+  if (scoreFailed.length && hooks?.onScoreError) {
+    await hooks.onScoreError
+      .promise({
+        failedCount: scoreFailed.length,
+        total: scored.length,
+        names: scoreFailed.map((s) => s.candidate?.geekName).filter(Boolean)
+      })
+      .catch(() => {})
+  }
 
   // 硬不达标的人补 X：延后到评分全部落地后串行做（卡片不虚拟化、仍在列表里）
   if (!cfg.dryRun) {
@@ -258,7 +279,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         resumeChars: s.resumeChars ?? 0,
         hasViewed: !!s.candidate._hasViewed,
         schoolRank: s.candidate._schoolRank ?? 0,
-        canvasOk: s.canvasOk
+        canvasOk: s.canvasOk,
+        llmError: s.llmError === true
       })),
       wouldGreet: greetSet.map((g) => ({ geekName: g.candidate.geekName, score: g.score })),
       budgets

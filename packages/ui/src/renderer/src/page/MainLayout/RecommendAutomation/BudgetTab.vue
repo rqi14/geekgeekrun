@@ -17,6 +17,15 @@
           controls-position="right"
         />
       </el-form-item>
+      <el-form-item label="每轮最多查看简历人数">
+        <el-input-number
+          v-model="model.maxViewPerRun"
+          :min="0"
+          :value-on-clear="0"
+          controls-position="right"
+        />
+        <div class="form-tip">查看简历（含评分）也算访问，过多同样有风险。</div>
+      </el-form-item>
       <el-form-item label="每轮最多 X（不感兴趣）人数">
         <el-input-number
           v-model="model.maxXPerRun"
@@ -49,6 +58,28 @@
           :value-on-clear="1"
           controls-position="right"
         />
+      </el-form-item>
+    </el-card>
+
+    <el-card class="config-section">
+      <div class="section-title">简历评分</div>
+      <el-form-item label="评分并发数">
+        <el-input-number
+          v-model="model.scoreConcurrency"
+          :min="1"
+          :value-on-clear="1"
+          controls-position="right"
+        />
+        <div class="form-tip">同时进行的 LLM 评分数上限。简历是串行抽取，并发通常自然低于此值，这里是安全上限。</div>
+      </el-form-item>
+      <el-form-item label="评分失败最多尝试次数">
+        <el-input-number
+          v-model="model.scoreMaxAttempts"
+          :min="1"
+          :value-on-clear="1"
+          controls-position="right"
+        />
+        <div class="form-tip">限流/网络失败时自动重试的总次数（含首次）。用尽仍失败按 0 分跳过，并弹窗提醒。</div>
       </el-form-item>
     </el-card>
 
