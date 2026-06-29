@@ -183,7 +183,8 @@ export function migrateJobFilter (filter) {
     modelId: rb.modelId ?? oldLlm.rubricGenerationModelId ?? null,
     passThreshold: rb.passThreshold ?? oldLlm.passThreshold ?? oldRubric.passThreshold ?? 75,
     knockouts: rb.knockouts ?? oldRubric.knockouts ?? [],
-    dimensions: rb.dimensions ?? oldRubric.dimensions ?? []
+    dimensions: rb.dimensions ?? oldRubric.dimensions ?? [],
+    _scoring_note: rb._scoring_note ?? oldRubric._scoring_note ?? null
   }
 
   const recommend = {
@@ -204,7 +205,7 @@ export function migrateJobFilter (filter) {
   // 保留未知顶层键；剥离已迁入块的旧扁平键，避免新旧并存引发歧义
   const migratedAwayKeys = new Set([
     'preFilter', 'rubric', 'recommend', 'chat',
-    'resumeLlmEnabled', 'resumeLlmConfig', 'resumeKeywordsEnabled', 'resumeKeywords',
+    'resumeLlmEnabled', 'resumeLlmConfig', 'resumeLlmRule', 'resumeKeywordsEnabled', 'resumeKeywords',
     'resumeRegExpEnabled', 'resumeRegExpStr',
     'expectCityEnabled', 'expectCityList', 'expectEducationEnabled', 'expectEducationRegExpStr',
     'expectWorkExpMinEnabled', 'expectWorkExpMaxEnabled', 'expectWorkExpRange',
@@ -359,7 +360,7 @@ export const getMergedJobConfig = (jobId) => {
   const scoring = jobFilter.recommend?.scoringEnabled && hasRubric
     ? {
         enabled: true,
-        rubric: { ...rubric, passThreshold: rubric.passThreshold },
+        rubric,
         minScoreToChat:
           typeof jobFilter.recommend.minScoreToChat === 'number'
             ? jobFilter.recommend.minScoreToChat
