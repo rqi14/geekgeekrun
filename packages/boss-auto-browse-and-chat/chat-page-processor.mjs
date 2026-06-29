@@ -10,6 +10,7 @@ import { createHumanCursor } from './humanMouse.mjs'
 import { dismissBlockingOverlays } from './dialog-dismisser.mjs'
 import {
   openOnlineResume,
+  closeOnlineResumeIfOpen,
   getOnlineResumeText,
   requestAttachmentResume,
   openPreviewAndDownloadPdf,
@@ -32,7 +33,6 @@ import {
   CHAT_PAGE_NAME_SELECTOR,
   CHAT_PAGE_JOB_SELECTOR,
   CHAT_PAGE_PREVIEW_RESUME_BTN_SELECTOR,
-  CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR,
   CHAT_PAGE_JOB_DROPDOWN_SELECTOR,
   CHAT_PAGE_JOB_ITEM_SELECTOR
 } from './constant.mjs'
@@ -422,25 +422,11 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       // 切换会话前必须确保在线简历弹窗已关闭。
       // 弹窗遮挡会导致下方会话列表的点击被拦截，使会话无法切换（右侧面板仍显示上一个人），
       // 进而导致打开的在线简历是上一个候选人的数据。
+      // 用 iframe 判定是否打开、Esc 优先关闭，对 BOSS 改版（关闭按钮 selector 失配）更鲁棒。
       {
-        const resumeCloseBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-        if (resumeCloseBtn) {
-          logDebug(`${LOG}   → 检测到在线简历弹窗未关闭，点击关闭...`)
-          const closeBox = await resumeCloseBtn.boundingBox().catch(() => null)
-          if (closeBox) {
-            await cursor.click({ x: closeBox.x + closeBox.width / 2, y: closeBox.y + closeBox.height / 2 })
-          } else {
-            await resumeCloseBtn.click().catch(() => {})
-          }
-          try {
-            await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR, { hidden: true, timeout: 4000 })
-            logDebug(`${LOG}   → 在线简历弹窗已关闭`)
-          } catch {
-            const stillOpen = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-            if (stillOpen) {
-              logWarn(`${LOG}   → 在线简历弹窗关闭失败（4s 超时），继续尝试切换会话，但可能影响会话切换成功率`)
-            }
-          }
+        const closed = await closeOnlineResumeIfOpen(page, { cursor })
+        if (!closed) {
+          logWarn(`${LOG}   → 在线简历弹窗关闭失败，继续尝试切换会话，但可能影响会话切换成功率`)
         }
       }
 
@@ -699,19 +685,10 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
 
       if (pass) {
         logInfo(`${LOG}   → 筛选通过，发送索取附件简历请求...`)
-        const openResumeCloseBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-        if (openResumeCloseBtn) {
-          logDebug(`${LOG}   → 先关闭在线简历弹窗，避免遮挡附件简历按钮...`)
-          const closeBox2 = await openResumeCloseBtn.boundingBox().catch(() => null)
-          if (closeBox2) {
-            await cursor.click({ x: closeBox2.x + closeBox2.width / 2, y: closeBox2.y + closeBox2.height / 2 })
-          } else {
-            await openResumeCloseBtn.click().catch(() => {})
-          }
-          try {
-            await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR, { hidden: true, timeout: 3000 })
-            logDebug(`${LOG}   → 在线简历弹窗已关闭`)
-          } catch {
+        // 先关闭在线简历弹窗，避免遮挡附件简历按钮（iframe 判定 + Esc 优先，鲁棒于改版）
+        {
+          const resumeClosed = await closeOnlineResumeIfOpen(page, { cursor })
+          if (!resumeClosed) {
             logWarn(`${LOG}   → 在线简历弹窗关闭超时，继续尝试（可能影响附件简历按钮点击）`)
           }
           await sleepWithRandomDelay(500, 1000)
