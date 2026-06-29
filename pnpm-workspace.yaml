@@ -1,5 +1,9 @@
 packages:
   - 'packages/*'
+# pnpm 10/11 不再读取 .npmrc 里的 node-linker，需在此声明（.npmrc 的同名设置保留给旧版 pnpm）。
+# hoisted = 扁平 node_modules，保证 puppeteer-extra 运行时按名 require 的插件依赖
+# （user-preferences / user-data-dir 等）以及主进程 bundle externalize 的传递依赖都能解析。
+nodeLinker: hoisted
 allowBuilds:
   '@parcel/watcher': true
   better-sqlite3: true
