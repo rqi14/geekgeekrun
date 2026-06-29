@@ -555,10 +555,6 @@ interface JobFilter {
   recommendSkipViewedCandidates: boolean
   // ── ④ 沟通页行为（chat）──
   chatLlmFilterEnabled: boolean
-  chatKeywordsEnabled: boolean
-  chatKeywordsStr: string
-  chatRegexEnabled: boolean
-  chatRegexStr: string
 }
 
 interface JobItem {
@@ -624,11 +620,7 @@ function rawToJobItem(raw: Record<string, any>): JobItem {
       recommendOnScoreError: rec.onScoreError === 'chat' ? 'chat' : 'skip',
       recommendSkipViewedCandidates: rec.skipViewedCandidates ?? false,
       // ── ④ 沟通页行为 ──
-      chatLlmFilterEnabled: ch.llmFilterEnabled ?? f.resumeLlmEnabled ?? false,
-      chatKeywordsEnabled: ch.keywordsEnabled ?? f.resumeKeywordsEnabled ?? false,
-      chatKeywordsStr: listToStr(ch.keywords ?? f.resumeKeywords ?? f.resumeKeywordsStr),
-      chatRegexEnabled: ch.regexEnabled ?? f.resumeRegExpEnabled ?? false,
-      chatRegexStr: ch.regex ?? f.resumeRegExpStr ?? ''
+      chatLlmFilterEnabled: ch.llmFilterEnabled ?? f.resumeLlmEnabled ?? false
     }
   }
 }

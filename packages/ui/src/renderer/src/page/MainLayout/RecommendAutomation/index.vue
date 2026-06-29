@@ -20,10 +20,6 @@
       </el-tabs>
       <div v-else class="loading-placeholder">配置加载中…</div>
 
-      <div v-if="regexError" class="regex-warn">
-        筛选条件中存在无效正则（学历或屏蔽姓名），请修正后再保存：{{ regexError }}
-      </div>
-
       <div class="flow-hint">流程：卡片初筛(省点击) → 开简历LLM精排 → 按分打招呼。</div>
 
       <div class="action-bar">
@@ -36,15 +32,8 @@
         >
           <el-option v-for="j in jobs" :key="j.jobId" :label="j.jobName" :value="j.jobId" />
         </el-select>
-        <el-button :loading="isSaving" :disabled="!!regexError" @click="handleSave"
-          >仅保存</el-button
-        >
-        <el-button
-          type="primary"
-          :loading="isSaving"
-          :disabled="!!regexError"
-          @click="handleSaveAndRun"
-        >
+        <el-button :loading="isSaving" @click="handleSave">仅保存</el-button>
+        <el-button type="primary" :loading="isSaving" @click="handleSaveAndRun">
           保存并运行
         </el-button>
       </div>
@@ -87,8 +76,8 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, computed, onMounted, onActivated } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, reactive, onMounted, onActivated } from 'vue'
+import { ElMessage } from 'element-plus'
 import RunningOverlay from '@renderer/features/RunningOverlay/index.vue'
 import { RUNNING_STATUS_ENUM } from '../../../../../common/enums/auto-start-chat'
 import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-by-step-check'
@@ -104,21 +93,6 @@ const activeTab = ref('budget')
 const loaded = ref(false)
 const isSaving = ref(false)
 
-const checkRegex = (v: string): string => {
-  if (!v) return ''
-  try {
-    // eslint-disable-next-line no-new
-    new RegExp(v)
-    return ''
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err)
-  }
-}
-const regexError = computed(
-  () =>
-    checkRegex(state.filter.expectEducationRegExpStr) ||
-    checkRegex(state.filter.blockCandidateNameRegExpStr)
-)
 const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
@@ -130,8 +104,6 @@ const selectedJobId = ref<string>('') // 空 = 用 BOSS 页当前选中的职位
 const state = reactive(normalizeRecommendConfig({})) as RecommendConfigState
 
 const applyState = (next: RecommendConfigState) => {
-  Object.assign(state.scoring, next.scoring)
-  Object.assign(state.filter, next.filter)
   Object.assign(state.budget, next.budget)
   Object.assign(state.run, next.run)
 }
@@ -195,21 +167,6 @@ const handleSave = async () => {
 }
 
 const handleSaveAndRun = async () => {
-  if (state.scoring.enabled && !state.scoring.jd) {
-    try {
-      await ElMessageBox.confirm(
-        '已开启 LLM 精排，但未填写 JD（也无 rubric），评分将回退为「仅规则初筛」。是否继续？',
-        '评分将回退规则-only',
-        {
-          confirmButtonText: '继续',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }
-      )
-    } catch {
-      return
-    }
-  }
   isSaving.value = true
   try {
     await doSave()
@@ -259,15 +216,6 @@ const handleStopButtonClick = async () => {
     padding: 48px 0;
     text-align: center;
     color: #909399;
-  }
-
-  .regex-warn {
-    margin-top: 12px;
-    padding: 8px 12px;
-    font-size: 13px;
-    color: #f56c6c;
-    background: #fef0f0;
-    border-radius: 4px;
   }
 
   .section-title {
