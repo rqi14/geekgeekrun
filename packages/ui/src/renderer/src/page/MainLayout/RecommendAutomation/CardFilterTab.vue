@@ -1,6 +1,16 @@
 <template>
   <el-form label-position="top">
     <el-alert
+      class="mb12"
+      type="info"
+      :closable="false"
+      show-icon
+      title="此处为「未选择职位」时的全局兜底卡片初筛"
+    >
+      按职位运行时，卡片初筛以「职位配置 → 卡片初筛」为准（每个职位各自独立）。
+      请优先在「职位配置」里配置；此页仅在不区分职位时生效。
+    </el-alert>
+    <el-alert
       class="mb16"
       type="success"
       :closable="false"

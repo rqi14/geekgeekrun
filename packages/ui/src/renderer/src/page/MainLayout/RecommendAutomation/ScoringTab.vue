@@ -1,5 +1,15 @@
 <template>
   <el-form label-position="top">
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      title="此处为「未选择职位」时的全局兜底评分"
+      class="mb12"
+    >
+      按职位运行时，评分以「职位配置 → AI 评分标准 + 推荐牛人页行为」为准（每个职位各自独立）。
+      请优先在「职位配置」里配置；此页仅在不区分职位时生效。
+    </el-alert>
     <el-card class="config-section">
       <div class="section-title">职位描述 (JD)</div>
       <div class="form-tip mb12">
@@ -40,7 +50,6 @@
       </el-form-item>
       <el-form-item label="评分模型">
         <el-select v-model="model.modelId" clearable placeholder="用默认（按用途）">
-          <el-option label="用默认（按用途）" :value="null" />
           <el-option v-for="m in models" :key="m.id" :label="m.label" :value="m.id" />
         </el-select>
         <div class="form-tip">
