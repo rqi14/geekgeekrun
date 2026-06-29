@@ -3,43 +3,6 @@
     <div class="main__wrap">
       <el-form :model="formContent" label-position="top">
         <el-card class="config-section">
-          <template #header>
-            <span>职位沟通队列</span>
-          </template>
-          <template v-if="jobsList.length === 0">
-            <el-alert
-              title="请先在「职位配置」页面同步职位列表"
-              type="info"
-              :closable="false"
-              show-icon
-            />
-          </template>
-          <template v-else>
-            <el-table :data="jobsList" style="width: 100%">
-              <el-table-column prop="jobName" label="职位名称" />
-              <el-table-column label="纳入处理" width="100" align="center">
-                <template #default="{ row }">
-                  <el-checkbox v-model="row.sequence.enabled" />
-                </template>
-              </el-table-column>
-              <el-table-column label="执行推荐牛人" width="120" align="center">
-                <template #default="{ row }">
-                  <el-checkbox v-model="row.sequence.runRecommend" :disabled="!row.sequence.enabled" />
-                </template>
-              </el-table-column>
-              <el-table-column label="执行沟通页" width="110" align="center">
-                <template #default="{ row }">
-                  <el-checkbox v-model="row.sequence.runChat" :disabled="!row.sequence.enabled" />
-                </template>
-              </el-table-column>
-            </el-table>
-            <div style="margin-top: 8px; font-size: 12px; color: #909399;">
-              勾选的职位将在处理沟通页时被依次扫描。若全部不勾选则不处理任何职位。「执行推荐牛人」和「执行沟通页」列在「自动顺序执行」模式下生效。
-            </div>
-          </template>
-        </el-card>
-
-        <el-card class="config-section">
           <el-form-item mb0>
             <div class="section-title">沟通页运行策略</div>
           </el-form-item>
@@ -77,7 +40,9 @@
           :closable="false"
           show-icon
           style="margin-bottom: 16px"
-        />
+        >
+          职位执行队列请在「职位执行队列」页面配置。
+        </el-alert>
 
         <div class="action-bar">
           <el-button :loading="isSaving" @click="handleSave">仅保存配置</el-button>
@@ -143,15 +108,6 @@ const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 
-interface JobSequenceItem {
-  jobId: string
-  jobName: string
-  sequence: { enabled: boolean; runRecommend: boolean; runChat: boolean }
-  [key: string]: unknown
-}
-
-const jobsList = ref<JobSequenceItem[]>([])
-
 const formContent = reactive({
   chatPage: {
     maxProcessPerRun: 20,
@@ -163,24 +119,13 @@ const formContent = reactive({
 
 const loadData = async () => {
   try {
-    const [recruiterResult, jobsResult] = await Promise.all([
-      ipcRenderer.invoke('fetch-boss-recruiter-config-file-content'),
-      ipcRenderer.invoke('fetch-boss-jobs-config')
-    ])
+    const recruiterResult = await ipcRenderer.invoke('fetch-boss-recruiter-config-file-content')
     const recruiterConfig = recruiterResult?.config?.['boss-recruiter.json'] || {}
     const chatPage = recruiterConfig.chatPage ?? {}
     formContent.chatPage.maxProcessPerRun = chatPage.maxProcessPerRun ?? 20
     formContent.chatPage.runOnceAfterComplete = chatPage.runOnceAfterComplete ?? false
     formContent.chatPage.keepBrowserOpenAfterRun = chatPage.keepBrowserOpenAfterRun ?? false
     formContent.chatPage.rerunIntervalMs = chatPage.rerunIntervalMs ?? 3000
-    jobsList.value = (jobsResult?.jobs ?? []).map((j: any) => ({
-      ...j,
-      sequence: {
-        enabled: j.sequence?.enabled ?? true,
-        runRecommend: j.sequence?.runRecommend ?? true,
-        runChat: j.sequence?.runChat ?? true
-      }
-    }))
   } catch (err) {
     console.error(err)
   }
@@ -199,9 +144,6 @@ const doSave = async () => {
     }
   }
   await ipcRenderer.invoke('save-boss-recruiter-config', JSON.stringify(payload))
-  if (jobsList.value.length > 0) {
-    await ipcRenderer.invoke('save-boss-jobs-config', JSON.stringify({ jobs: jobsList.value }))
-  }
 }
 
 const handleSave = async () => {

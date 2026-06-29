@@ -1,13 +1,16 @@
 <template>
   <div class="recommend-automation__wrap">
     <div class="main__wrap">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="筛选与评分已集中到「职位配置」(按职位设置)"
+        style="margin-bottom: 16px"
+      >
+        此页只配置运行预算/节奏与执行。按职位运行时使用对应职位的配置。
+      </el-alert>
       <el-tabs v-if="loaded" v-model="activeTab" type="border-card">
-        <el-tab-pane label="职位&评分" name="scoring">
-          <ScoringTab v-model="state.scoring" :models="models" />
-        </el-tab-pane>
-        <el-tab-pane label="卡片初筛" name="filter">
-          <CardFilterTab v-model="state.filter" />
-        </el-tab-pane>
         <el-tab-pane label="预算&节奏" name="budget">
           <BudgetTab v-model="state.budget" />
         </el-tab-pane>
@@ -92,14 +95,12 @@ import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-
 import { normalizeRecommendConfig } from './mapping'
 import type { RecommendConfigState } from './mapping'
 import { loadRecommendConfig, saveRecommendConfig, fetchEnabledModels } from './useRecommendConfig'
-import ScoringTab from './ScoringTab.vue'
-import CardFilterTab from './CardFilterTab.vue'
 import BudgetTab from './BudgetTab.vue'
 import RunTab from './RunTab.vue'
 
 const { ipcRenderer } = electron
 
-const activeTab = ref('scoring')
+const activeTab = ref('budget')
 const loaded = ref(false)
 const isSaving = ref(false)
 

@@ -458,41 +458,9 @@
             <div class="filter-row resume-module-row">
               <el-checkbox
                 v-model="job.filter.chatLlmFilterEnabled"
-                label="沟通页用上面的 Rubric 筛选简历"
+                label="沟通页用上面的 AI Rubric 筛选简历（与推荐牛人页同一套标准）"
               />
             </div>
-
-            <div class="filter-row resume-module-row">
-              <el-checkbox v-model="job.filter.chatKeywordsEnabled" label="关键词匹配" />
-            </div>
-            <el-form-item
-              v-if="job.filter.chatKeywordsEnabled"
-              label="关键词列表（含任一即通过）"
-              class="resume-module-content"
-            >
-              <el-input
-                v-model="job.filter.chatKeywordsStr"
-                placeholder="多个用逗号分隔，例如：Python,机器学习"
-                @blur="
-                  job.filter.chatKeywordsStr = normalizeCommaSplittedStr(job.filter.chatKeywordsStr)
-                "
-              />
-            </el-form-item>
-
-            <div class="filter-row resume-module-row">
-              <el-checkbox v-model="job.filter.chatRegexEnabled" disabled label="正则匹配（暂未支持）" />
-            </div>
-            <el-form-item
-              v-if="job.filter.chatRegexEnabled"
-              label="正则表达式（暂未支持）"
-              class="resume-module-content"
-            >
-              <el-input
-                v-model="job.filter.chatRegexStr"
-                disabled
-                placeholder="正则表达式，例如：Python.{0,20}(3年|三年)"
-              />
-            </el-form-item>
 
             <!-- 保存按钮 -->
             <div class="job-action-bar">
@@ -740,10 +708,10 @@ function jobItemToRaw(job: JobItem): Record<string, any> {
       },
       chat: {
         llmFilterEnabled: f.chatLlmFilterEnabled,
-        keywordsEnabled: f.chatKeywordsEnabled,
-        keywords: strToList(f.chatKeywordsStr),
-        regexEnabled: f.chatRegexEnabled,
-        regex: f.chatRegexStr
+        keywordsEnabled: false,
+        keywords: [],
+        regexEnabled: false,
+        regex: ''
       }
     }
   }
