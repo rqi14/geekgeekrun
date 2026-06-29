@@ -22,10 +22,10 @@
           </template>
 
           <el-form :model="job" label-position="top" class="job-form">
-            <!-- ── 两页通用筛选 ── -->
+            <!-- ── ① 卡片初筛（推荐 + 沟通 均生效）── -->
             <div class="section-label">
-              <span>候选人基础筛选</span>
-              <el-tag size="small">推荐牛人页 + 沟通页 均生效</el-tag>
+              <span>① 卡片初筛（推荐 + 沟通 均生效）</span>
+              <el-tag size="small">开简历前按卡片信息粗筛</el-tag>
             </div>
 
             <div class="filter-row">
@@ -159,16 +159,9 @@
               </el-form-item>
             </div>
 
-            <!-- ── 推荐牛人页：卡片初筛 ── -->
-            <div class="section-label">
-              <span>专业/方向相关性（卡片初筛）</span>
-              <el-tag size="small" type="success"
-                >推荐牛人页：开简历前按关键词粗筛，省查看额度</el-tag
-              >
-            </div>
             <div class="form-tip">
               命中「排除词」且未命中「包含词」→ 不开简历（跳过）；命中「包含词」→ 保留；都不命中 →
-              默认开（交简历精评决定）。例外词放进「包含词」即可压过排除（如
+              默认开（交后续步骤决定）。例外词放进「包含词」即可压过排除（如
               液滴微流控/自组装/冻干）。
             </div>
             <el-form-item label="排除词（疑似不对口）" class="flex-1">
@@ -190,62 +183,60 @@
               />
             </el-form-item>
 
-            <!-- ── 沟通页专属 ── -->
-            <div class="section-label">
-              <span>简历全文筛选</span>
-              <el-tag size="small" type="warning">仅沟通页生效，推荐牛人页不使用此项</el-tag>
-            </div>
-
-            <div class="form-tip resume-filter-tip">
-              勾选一个或多个筛选模块；全部不勾选则不筛选简历全文
-            </div>
-
-            <div class="filter-row resume-module-row">
-              <el-checkbox v-model="job.filter.resumeKeywordsEnabled" label="关键词匹配" />
-            </div>
-            <el-form-item
-              v-if="job.filter.resumeKeywordsEnabled"
-              label="关键词列表（含任一即通过）"
-              class="resume-module-content"
-            >
+            <el-form-item label="技能关键词" class="flex-1">
               <el-input
-                v-model="job.filter.resumeKeywordsStr"
+                v-model="job.filter.expectSkillKeywordsStr"
                 placeholder="多个用逗号分隔，例如：Python,机器学习"
                 @blur="
-                  job.filter.resumeKeywordsStr = normalizeCommaSplittedStr(
-                    job.filter.resumeKeywordsStr
+                  job.filter.expectSkillKeywordsStr = normalizeCommaSplittedStr(
+                    job.filter.expectSkillKeywordsStr
                   )
                 "
               />
             </el-form-item>
-
-            <div class="filter-row resume-module-row">
-              <el-checkbox v-model="job.filter.resumeRegExpEnabled" label="正则表达式匹配" />
-            </div>
-            <el-form-item
-              v-if="job.filter.resumeRegExpEnabled"
-              label="正则表达式（匹配即通过）"
-              class="resume-module-content"
-            >
+            <el-form-item label="院校关键词" class="flex-1">
               <el-input
-                v-model="job.filter.resumeRegExpStr"
-                placeholder="正则表达式，例如：Python.{0,20}(3年|三年)"
+                v-model="job.filter.expectSchoolKeywordsStr"
+                placeholder="多个用逗号分隔，例如：清华,北大,985"
+                @blur="
+                  job.filter.expectSchoolKeywordsStr = normalizeCommaSplittedStr(
+                    job.filter.expectSchoolKeywordsStr
+                  )
+                "
+              />
+            </el-form-item>
+            <el-form-item label="专业关键词" class="flex-1">
+              <el-input
+                v-model="job.filter.expectMajorKeywordsStr"
+                placeholder="多个用逗号分隔，例如：化工,材料,计算机"
+                @blur="
+                  job.filter.expectMajorKeywordsStr = normalizeCommaSplittedStr(
+                    job.filter.expectMajorKeywordsStr
+                  )
+                "
+              />
+            </el-form-item>
+            <el-form-item label="屏蔽姓名（正则）" class="flex-1">
+              <el-input
+                v-model="job.filter.blockCandidateNameRegExpStr"
+                placeholder="正则表达式，命中即跳过，例如：^张三$|李四"
               />
             </el-form-item>
 
-            <div class="filter-row resume-module-row">
-              <el-checkbox v-model="job.filter.resumeLlmEnabled" label="大模型筛选（AI Rubric）" />
-              <el-tag size="small" type="success" style="margin-left: 8px"
-                >此 Rubric 同时用于推荐牛人页精评（沟通页关键词/正则仍仅沟通页生效）</el-tag
-              >
+            <!-- ── ② AI 评分标准（Rubric · 唯一真源）── -->
+            <div class="section-label">
+              <span>② AI 评分标准（Rubric · 唯一真源）</span>
+              <el-tag size="small" type="success">推荐评分 + 沟通筛选 共用</el-tag>
             </div>
-            <div v-if="job.filter.resumeLlmEnabled" class="resume-module-content llm-rubric-panel">
+            <div class="form-tip">此 Rubric 为评分唯一来源，被下方推荐评分与沟通筛选共用。</div>
+
+            <div class="llm-rubric-panel">
               <!-- Step 1: AI Rubric Builder -->
               <div class="rubric-step">
                 <div class="rubric-step-label">Step 1：智能生成</div>
-                <el-form-item label="模型（用于生成评分标准）" style="margin-bottom: 8px">
+                <el-form-item label="模型（用于生成 / 评分）" style="margin-bottom: 8px">
                   <el-select
-                    v-model="job.filter.resumeLlmConfig.rubricGenerationModelId"
+                    v-model="job.filter.rubric.modelId"
                     placeholder="默认：按 boss-llm.json 的 purpose/默认模型选择"
                     clearable
                     filterable
@@ -273,7 +264,7 @@
                   </div>
                 </el-form-item>
                 <el-input
-                  v-model="job.filter.resumeLlmConfig.sourceJd"
+                  v-model="job.filter.rubric.sourceJd"
                   type="textarea"
                   :autosize="{ minRows: 3 }"
                   placeholder="粘贴岗位描述（JD）、招聘要求或标杆简历片段..."
@@ -289,7 +280,7 @@
                   </el-button>
                   <el-button
                     plain
-                    :disabled="!job.filter.resumeLlmConfig.sourceJd.trim()"
+                    :disabled="!job.filter.rubric.sourceJd.trim()"
                     @click="handleCopyRubricPrompt(job)"
                   >
                     复制 Prompt
@@ -327,10 +318,10 @@
                     <span class="rubric-block-title">一票否决项</span>
                     <div class="knockout-tags">
                       <el-tag
-                        v-for="(item, idx) in job.filter.resumeLlmConfig.rubric.knockouts"
+                        v-for="(item, idx) in job.filter.rubric.knockouts"
                         :key="idx"
                         closable
-                        @close="job.filter.resumeLlmConfig.rubric.knockouts.splice(idx, 1)"
+                        @close="job.filter.rubric.knockouts.splice(idx, 1)"
                       >
                         {{ item }}
                       </el-tag>
@@ -341,7 +332,7 @@
                     <span class="rubric-block-title">评分维度</span>
                     <div class="dimensions-list">
                       <el-card
-                        v-for="(dim, idx) in job.filter.resumeLlmConfig.rubric.dimensions"
+                        v-for="(dim, idx) in job.filter.rubric.dimensions"
                         :key="idx"
                         shadow="never"
                         class="dimension-card"
@@ -405,26 +396,103 @@
                   <div class="rubric-block pass-threshold">
                     <span class="rubric-block-title">通过分数线</span>
                     <el-slider
-                      v-model="job.filter.resumeLlmConfig.passThreshold"
+                      v-model="job.filter.rubric.passThreshold"
                       :min="0"
                       :max="100"
                       :marks="{ 0: '0', 50: '50', 75: '75', 100: '100' }"
                     />
                     <span class="threshold-value"
-                      >≥ {{ job.filter.resumeLlmConfig.passThreshold }} 分通过</span
+                      >≥ {{ job.filter.rubric.passThreshold }} 分通过</span
                     >
                   </div>
                 </div>
               </div>
-              <el-form-item v-else label="（旧）简单规则" class="fallback-rule">
-                <el-input
-                  v-model="job.filter.resumeLlmRule"
-                  type="textarea"
-                  :autosize="{ minRows: 2 }"
-                  placeholder="或直接输入筛选描述，例如：必须有3年以上Python经验"
-                />
-              </el-form-item>
             </div>
+
+            <!-- ── ③ 推荐牛人页行为 ── -->
+            <div class="section-label">
+              <span>③ 推荐牛人页行为</span>
+              <el-tag size="small" type="success">仅推荐牛人页生效</el-tag>
+            </div>
+
+            <div class="filter-row resume-module-row">
+              <el-checkbox
+                v-model="job.filter.recommendScoringEnabled"
+                label="推荐页开简历后用上面的 Rubric 精评"
+              />
+            </div>
+            <el-form-item label="最低进入沟通分数" class="flex-1">
+              <el-input-number
+                v-model="job.filter.recommendMinScoreToChat"
+                :min="0"
+                :max="100"
+                controls-position="right"
+                :disabled="!job.filter.recommendScoringEnabled"
+                placeholder="不填则用 Rubric 通过分"
+              />
+              <div class="form-tip">不填则使用上方 Rubric 的通过分数线</div>
+            </el-form-item>
+            <el-form-item label="评分出错时" class="flex-1">
+              <el-select
+                v-model="job.filter.recommendOnScoreError"
+                :disabled="!job.filter.recommendScoringEnabled"
+                style="width: 100%"
+              >
+                <el-option value="skip" label="跳过（不沟通）" />
+                <el-option value="chat" label="仍然沟通" />
+              </el-select>
+            </el-form-item>
+            <div class="filter-row resume-module-row">
+              <el-checkbox
+                v-model="job.filter.recommendSkipViewedCandidates"
+                label="跳过已查看过的候选人"
+              />
+            </div>
+
+            <!-- ── ④ 沟通页行为 ── -->
+            <div class="section-label">
+              <span>④ 沟通页行为</span>
+              <el-tag size="small" type="warning">仅沟通页生效</el-tag>
+            </div>
+
+            <div class="filter-row resume-module-row">
+              <el-checkbox
+                v-model="job.filter.chatLlmFilterEnabled"
+                label="沟通页用上面的 Rubric 筛选简历"
+              />
+            </div>
+
+            <div class="filter-row resume-module-row">
+              <el-checkbox v-model="job.filter.chatKeywordsEnabled" label="关键词匹配" />
+            </div>
+            <el-form-item
+              v-if="job.filter.chatKeywordsEnabled"
+              label="关键词列表（含任一即通过）"
+              class="resume-module-content"
+            >
+              <el-input
+                v-model="job.filter.chatKeywordsStr"
+                placeholder="多个用逗号分隔，例如：Python,机器学习"
+                @blur="
+                  job.filter.chatKeywordsStr = normalizeCommaSplittedStr(job.filter.chatKeywordsStr)
+                "
+              />
+            </el-form-item>
+
+            <div class="filter-row resume-module-row">
+              <el-checkbox v-model="job.filter.chatRegexEnabled" disabled label="正则匹配（暂未支持）" />
+            </div>
+            <el-form-item
+              v-if="job.filter.chatRegexEnabled"
+              label="正则表达式（暂未支持）"
+              class="resume-module-content"
+            >
+              <el-input
+                v-model="job.filter.chatRegexStr"
+                disabled
+                placeholder="正则表达式，例如：Python.{0,20}(3年|三年)"
+              />
+            </el-form-item>
 
             <!-- 保存按钮 -->
             <div class="job-action-bar">
@@ -479,14 +547,17 @@ interface RubricDimension {
   criteria: Record<string, string>
 }
 
-interface ResumeLlmConfig {
+// UI 评分标准模型（与持久化的 filter.rubric 同形：knockouts/dimensions 平铺在 rubric 下）
+interface UiRubric {
   sourceJd: string
+  modelId: string | null
   passThreshold: number
-  rubricGenerationModelId?: string | null
-  rubric: { knockouts: string[]; dimensions: RubricDimension[] }
+  knockouts: string[]
+  dimensions: RubricDimension[]
 }
 
 interface JobFilter {
+  // ── ① 卡片初筛（preFilter）──
   expectCityEnabled: boolean
   expectCityListStr: string
   expectEducationEnabled: boolean
@@ -500,13 +571,26 @@ interface JobFilter {
   expectSalaryWhenNegotiable: 'exclude' | 'include'
   fieldIncludeStr: string
   fieldExcludeStr: string
-  resumeKeywordsEnabled: boolean
-  resumeKeywordsStr: string
-  resumeRegExpEnabled: boolean
-  resumeRegExpStr: string
-  resumeLlmEnabled: boolean
-  resumeLlmRule: string
-  resumeLlmConfig: ResumeLlmConfig
+  expectSkillKeywordsStr: string
+  expectSchoolKeywordsStr: string
+  expectMajorKeywordsStr: string
+  blockCandidateNameRegExpStr: string
+  // 仅 hydrate / serialize 时透传的非 UI 字段
+  schoolFloorRank: number | null
+  nativeFilter: Record<string, any> | null
+  // ── ② AI 评分标准（rubric · 唯一真源）──
+  rubric: UiRubric
+  // ── ③ 推荐牛人页行为（recommend）──
+  recommendScoringEnabled: boolean
+  recommendMinScoreToChat: number | null
+  recommendOnScoreError: 'skip' | 'chat'
+  recommendSkipViewedCandidates: boolean
+  // ── ④ 沟通页行为（chat）──
+  chatLlmFilterEnabled: boolean
+  chatKeywordsEnabled: boolean
+  chatKeywordsStr: string
+  chatRegexEnabled: boolean
+  chatRegexStr: string
 }
 
 interface JobItem {
@@ -519,54 +603,78 @@ interface JobItem {
   _rubricJsonImport?: string
 }
 
-function defaultResumeLlmConfig(): ResumeLlmConfig {
+function defaultUiRubric(): UiRubric {
   return {
     sourceJd: '',
+    modelId: null,
     passThreshold: 75,
-    rubricGenerationModelId: null,
-    rubric: { knockouts: [], dimensions: [] }
+    knockouts: [],
+    dimensions: []
   }
 }
 
 function rawToJobItem(raw: Record<string, any>): JobItem {
   const f = raw.filter ?? {}
+  const pf = f.preFilter ?? {}
+  const rec = f.recommend ?? {}
+  const ch = f.chat ?? {}
   return {
     jobId: raw.jobId ?? raw.id ?? '',
     jobName: raw.jobName ?? raw.name ?? '',
     sequence: raw.sequence ?? { enabled: true, runRecommend: true, runChat: true },
     filter: {
-      expectCityEnabled: f.expectCityEnabled ?? false,
-      expectCityListStr: Array.isArray(f.expectCityList)
-        ? f.expectCityList.join(',')
-        : (f.expectCityListStr ?? ''),
-      expectEducationEnabled: f.expectEducationEnabled ?? false,
-      expectEducationRegExpStr: f.expectEducationRegExpStr ?? '',
-      expectWorkExpMinEnabled: f.expectWorkExpMinEnabled ?? false,
-      expectWorkExpMaxEnabled: f.expectWorkExpMaxEnabled ?? false,
-      expectWorkExpRange: f.expectWorkExpRange ?? [0, 99],
-      expectSalaryMinEnabled: f.expectSalaryMinEnabled ?? false,
-      expectSalaryMaxEnabled: f.expectSalaryMaxEnabled ?? false,
-      expectSalaryRange: f.expectSalaryRange ?? [0, 0],
+      // ── ① 卡片初筛 ── 新形 (filter.preFilter.X) 优先，回退旧扁平 (filter.X)
+      expectCityEnabled: pf.expectCityEnabled ?? f.expectCityEnabled ?? false,
+      expectCityListStr: listToStr(pf.expectCityList ?? f.expectCityList),
+      expectEducationEnabled: pf.expectEducationEnabled ?? f.expectEducationEnabled ?? false,
+      expectEducationRegExpStr: pf.expectEducationRegExpStr ?? f.expectEducationRegExpStr ?? '',
+      expectWorkExpMinEnabled: pf.expectWorkExpMinEnabled ?? f.expectWorkExpMinEnabled ?? false,
+      expectWorkExpMaxEnabled: pf.expectWorkExpMaxEnabled ?? f.expectWorkExpMaxEnabled ?? false,
+      expectWorkExpRange: pf.expectWorkExpRange ?? f.expectWorkExpRange ?? [0, 99],
+      expectSalaryMinEnabled: pf.expectSalaryMinEnabled ?? f.expectSalaryMinEnabled ?? false,
+      expectSalaryMaxEnabled: pf.expectSalaryMaxEnabled ?? f.expectSalaryMaxEnabled ?? false,
+      expectSalaryRange: pf.expectSalaryRange ?? f.expectSalaryRange ?? [0, 0],
       expectSalaryWhenNegotiable:
-        f.expectSalaryWhenNegotiable === 'include' ? 'include' : 'exclude',
-      fieldIncludeStr: Array.isArray(f.fieldRules?.include) ? f.fieldRules.include.join(',') : '',
-      fieldExcludeStr: Array.isArray(f.fieldRules?.exclude) ? f.fieldRules.exclude.join(',') : '',
-      resumeKeywordsEnabled: f.resumeKeywordsEnabled ?? false,
-      resumeKeywordsStr: Array.isArray(f.resumeKeywords)
-        ? f.resumeKeywords.join(',')
-        : (f.resumeKeywordsStr ?? ''),
-      resumeRegExpEnabled: f.resumeRegExpEnabled ?? false,
-      resumeRegExpStr: f.resumeRegExpStr ?? '',
-      resumeLlmEnabled: f.resumeLlmEnabled ?? false,
-      resumeLlmRule: f.resumeLlmRule ?? '',
-      resumeLlmConfig: parseResumeLlmConfig(f.resumeLlmConfig)
+        (pf.expectSalaryWhenNegotiable ?? f.expectSalaryWhenNegotiable) === 'include'
+          ? 'include'
+          : 'exclude',
+      fieldIncludeStr: listToStr((pf.fieldRules ?? f.fieldRules)?.include),
+      fieldExcludeStr: listToStr((pf.fieldRules ?? f.fieldRules)?.exclude),
+      expectSkillKeywordsStr: listToStr(pf.expectSkillKeywords ?? f.expectSkillKeywords),
+      expectSchoolKeywordsStr: listToStr(pf.expectSchoolKeywords ?? f.expectSchoolKeywords),
+      expectMajorKeywordsStr: listToStr(pf.expectMajorKeywords ?? f.expectMajorKeywords),
+      blockCandidateNameRegExpStr:
+        pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '',
+      schoolFloorRank: pf.schoolFloorRank ?? f.schoolFloorRank ?? null,
+      nativeFilter: pf.nativeFilter ?? f.nativeFilter ?? null,
+      // ── ② AI 评分标准 ── 新 filter.rubric 优先，回退旧 filter.resumeLlmConfig
+      rubric: parseRubric(f.rubric, f.resumeLlmConfig),
+      // ── ③ 推荐牛人页行为 ──
+      recommendScoringEnabled: rec.scoringEnabled ?? f.resumeLlmEnabled ?? false,
+      recommendMinScoreToChat:
+        typeof rec.minScoreToChat === 'number' ? rec.minScoreToChat : null,
+      recommendOnScoreError: rec.onScoreError === 'chat' ? 'chat' : 'skip',
+      recommendSkipViewedCandidates: rec.skipViewedCandidates ?? false,
+      // ── ④ 沟通页行为 ──
+      chatLlmFilterEnabled: ch.llmFilterEnabled ?? f.resumeLlmEnabled ?? false,
+      chatKeywordsEnabled: ch.keywordsEnabled ?? f.resumeKeywordsEnabled ?? false,
+      chatKeywordsStr: listToStr(ch.keywords ?? f.resumeKeywords ?? f.resumeKeywordsStr),
+      chatRegexEnabled: ch.regexEnabled ?? f.resumeRegExpEnabled ?? false,
+      chatRegexStr: ch.regex ?? f.resumeRegExpStr ?? ''
     }
   }
 }
 
-function parseResumeLlmConfig(raw: any): ResumeLlmConfig {
-  if (!raw || typeof raw !== 'object') return defaultResumeLlmConfig()
-  const r = raw.rubric || {}
+/**
+ * 解析 UI rubric 模型。优先新形 filter.rubric（knockouts/dimensions 平铺），
+ * 回退旧形 filter.resumeLlmConfig（rubric 嵌套 + rubricGenerationModelId）。
+ */
+function parseRubric(rawRubric: any, oldLlmConfig: any): UiRubric {
+  const isNew = rawRubric && typeof rawRubric === 'object'
+  const isOld = oldLlmConfig && typeof oldLlmConfig === 'object'
+  if (!isNew && !isOld) return defaultUiRubric()
+
+  const r = isNew ? rawRubric : oldLlmConfig?.rubric ?? {}
   const knockouts = Array.isArray(r.knockouts)
     ? r.knockouts.filter((k: any) => typeof k === 'string')
     : []
@@ -579,13 +687,12 @@ function parseResumeLlmConfig(raw: any): ResumeLlmConfig {
       '5': String(d?.criteria?.['5'] ?? d?.criteria?.[5] ?? '')
     }
   }))
-  return {
-    sourceJd: String(raw.sourceJd ?? ''),
-    passThreshold: typeof raw.passThreshold === 'number' ? raw.passThreshold : 75,
-    rubricGenerationModelId:
-      typeof raw.rubricGenerationModelId === 'string' ? raw.rubricGenerationModelId : null,
-    rubric: { knockouts, dimensions }
-  }
+  const sourceJd = String((isNew ? rawRubric.sourceJd : oldLlmConfig?.sourceJd) ?? '')
+  const passThresholdRaw = isNew ? rawRubric.passThreshold : oldLlmConfig?.passThreshold
+  const passThreshold = typeof passThresholdRaw === 'number' ? passThresholdRaw : 75
+  const modelIdRaw = isNew ? rawRubric.modelId : oldLlmConfig?.rubricGenerationModelId
+  const modelId = typeof modelIdRaw === 'string' ? modelIdRaw : null
+  return { sourceJd, modelId, passThreshold, knockouts, dimensions }
 }
 
 function jobItemToRaw(job: JobItem): Record<string, any> {
@@ -595,27 +702,55 @@ function jobItemToRaw(job: JobItem): Record<string, any> {
     jobName: job.jobName,
     sequence: job.sequence,
     filter: {
-      expectCityEnabled: f.expectCityEnabled,
-      expectCityList: strToList(f.expectCityListStr),
-      expectEducationEnabled: f.expectEducationEnabled,
-      expectEducationRegExpStr: f.expectEducationRegExpStr,
-      expectWorkExpMinEnabled: f.expectWorkExpMinEnabled,
-      expectWorkExpMaxEnabled: f.expectWorkExpMaxEnabled,
-      expectWorkExpRange: f.expectWorkExpRange,
-      expectSalaryMinEnabled: f.expectSalaryMinEnabled,
-      expectSalaryMaxEnabled: f.expectSalaryMaxEnabled,
-      expectSalaryRange: f.expectSalaryRange,
-      expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable,
-      fieldRules: { include: strToList(f.fieldIncludeStr), exclude: strToList(f.fieldExcludeStr) },
-      resumeKeywordsEnabled: f.resumeKeywordsEnabled,
-      resumeKeywords: strToList(f.resumeKeywordsStr),
-      resumeRegExpEnabled: f.resumeRegExpEnabled,
-      resumeRegExpStr: f.resumeRegExpStr,
-      resumeLlmEnabled: f.resumeLlmEnabled,
-      resumeLlmRule: f.resumeLlmRule,
-      resumeLlmConfig: f.resumeLlmConfig
+      preFilter: {
+        expectCityEnabled: f.expectCityEnabled,
+        expectCityList: strToList(f.expectCityListStr),
+        expectEducationEnabled: f.expectEducationEnabled,
+        expectEducationRegExpStr: f.expectEducationRegExpStr,
+        expectWorkExpMinEnabled: f.expectWorkExpMinEnabled,
+        expectWorkExpMaxEnabled: f.expectWorkExpMaxEnabled,
+        expectWorkExpRange: f.expectWorkExpRange,
+        expectSalaryMinEnabled: f.expectSalaryMinEnabled,
+        expectSalaryMaxEnabled: f.expectSalaryMaxEnabled,
+        expectSalaryRange: f.expectSalaryRange,
+        expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable,
+        expectSkillKeywords: strToList(f.expectSkillKeywordsStr),
+        expectSchoolKeywords: strToList(f.expectSchoolKeywordsStr),
+        expectMajorKeywords: strToList(f.expectMajorKeywordsStr),
+        blockCandidateNameRegExpStr: f.blockCandidateNameRegExpStr,
+        fieldRules: {
+          include: strToList(f.fieldIncludeStr),
+          exclude: strToList(f.fieldExcludeStr)
+        },
+        schoolFloorRank: f.schoolFloorRank,
+        nativeFilter: f.nativeFilter
+      },
+      rubric: {
+        sourceJd: f.rubric.sourceJd,
+        modelId: f.rubric.modelId,
+        passThreshold: f.rubric.passThreshold,
+        knockouts: f.rubric.knockouts,
+        dimensions: f.rubric.dimensions
+      },
+      recommend: {
+        scoringEnabled: f.recommendScoringEnabled,
+        minScoreToChat: f.recommendMinScoreToChat,
+        onScoreError: f.recommendOnScoreError,
+        skipViewedCandidates: f.recommendSkipViewedCandidates
+      },
+      chat: {
+        llmFilterEnabled: f.chatLlmFilterEnabled,
+        keywordsEnabled: f.chatKeywordsEnabled,
+        keywords: strToList(f.chatKeywordsStr),
+        regexEnabled: f.chatRegexEnabled,
+        regex: f.chatRegexStr
+      }
     }
   }
+}
+
+function listToStr(list: any): string {
+  return Array.isArray(list) ? list.filter((s) => typeof s === 'string').join(',') : ''
 }
 
 function normalizeCommaSplittedStr(str: string): string {
@@ -740,23 +875,20 @@ const handleCopyConfig = () => {
   ElMessage({ type: 'success', message: '配置已复制，请记得保存' })
 }
 
-function ensureResumeLlmConfig(job: JobItem) {
-  if (!job.filter.resumeLlmConfig) {
-    job.filter.resumeLlmConfig = defaultResumeLlmConfig()
+function ensureRubric(job: JobItem) {
+  if (!job.filter.rubric) {
+    job.filter.rubric = defaultUiRubric()
   }
-  if (!job.filter.resumeLlmConfig.rubric) {
-    job.filter.resumeLlmConfig.rubric = { knockouts: [], dimensions: [] }
+  if (!Array.isArray(job.filter.rubric.knockouts)) {
+    job.filter.rubric.knockouts = []
   }
-  if (!Array.isArray(job.filter.resumeLlmConfig.rubric.knockouts)) {
-    job.filter.resumeLlmConfig.rubric.knockouts = []
-  }
-  if (!Array.isArray(job.filter.resumeLlmConfig.rubric.dimensions)) {
-    job.filter.resumeLlmConfig.rubric.dimensions = []
+  if (!Array.isArray(job.filter.rubric.dimensions)) {
+    job.filter.rubric.dimensions = []
   }
 }
 
 function hasRubric(job: JobItem): boolean {
-  const d = job.filter.resumeLlmConfig?.rubric?.dimensions
+  const d = job.filter.rubric?.dimensions
   return Array.isArray(d) && d.length > 0
 }
 
@@ -802,7 +934,7 @@ const RUBRIC_GENERATION_PROMPT = `你是一个资深 HR，擅长将招聘需求�
 `
 
 function handleCopyRubricPrompt(job: JobItem) {
-  const jd = job.filter.resumeLlmConfig?.sourceJd?.trim() || ''
+  const jd = job.filter.rubric?.sourceJd?.trim() || ''
   if (!jd) return
   const full = RUBRIC_GENERATION_PROMPT + jd
   navigator.clipboard
@@ -820,29 +952,27 @@ function handleCopyRubricPrompt(job: JobItem) {
 }
 
 const handleGenerateRubric = async (job: JobItem) => {
-  ensureResumeLlmConfig(job)
-  const sourceJd = job.filter.resumeLlmConfig?.sourceJd?.trim() || ''
+  ensureRubric(job)
+  const sourceJd = job.filter.rubric?.sourceJd?.trim() || ''
   if (!sourceJd) {
     ElMessage({ type: 'warning', message: '请先输入岗位描述' })
     return
   }
   job._generatingRubric = true
   try {
-    const modelId = job.filter.resumeLlmConfig?.rubricGenerationModelId ?? null
+    const modelId = job.filter.rubric?.modelId ?? null
     const { rubric } = await ipcRenderer.invoke('generate-llm-rubric', { sourceJd, modelId })
     if (rubric) {
-      job.filter.resumeLlmConfig!.rubric = {
-        knockouts: rubric.knockouts ?? [],
-        dimensions: (rubric.dimensions ?? []).map((d: any) => ({
-          name: d.name ?? '',
-          weight: d.weight ?? 33,
-          criteria: {
-            '1': d.criteria?.['1'] ?? d.criteria?.[1] ?? '',
-            '3': d.criteria?.['3'] ?? d.criteria?.[3] ?? '',
-            '5': d.criteria?.['5'] ?? d.criteria?.[5] ?? ''
-          }
-        }))
-      }
+      job.filter.rubric.knockouts = rubric.knockouts ?? []
+      job.filter.rubric.dimensions = (rubric.dimensions ?? []).map((d: any) => ({
+        name: d.name ?? '',
+        weight: d.weight ?? 33,
+        criteria: {
+          '1': d.criteria?.['1'] ?? d.criteria?.[1] ?? '',
+          '3': d.criteria?.['3'] ?? d.criteria?.[3] ?? '',
+          '5': d.criteria?.['5'] ?? d.criteria?.[5] ?? ''
+        }
+      }))
       ElMessage({ type: 'success', message: '评分标准已生成，可微调后保存' })
     } else {
       ElMessage({ type: 'error', message: '生成失败，请检查 LLM 配置' })
@@ -856,16 +986,16 @@ const handleGenerateRubric = async (job: JobItem) => {
 }
 
 function addKnockout(job: JobItem) {
-  ensureResumeLlmConfig(job)
-  job.filter.resumeLlmConfig!.rubric.knockouts.push('新否决项')
+  ensureRubric(job)
+  job.filter.rubric.knockouts.push('新否决项')
 }
 
 function removeDimension(job: JobItem, idx: number) {
-  job.filter.resumeLlmConfig?.rubric?.dimensions?.splice(idx, 1)
+  job.filter.rubric?.dimensions?.splice(idx, 1)
 }
 
 function handleImportRubricJson(job: JobItem) {
-  ensureResumeLlmConfig(job)
+  ensureRubric(job)
   const raw = (job._rubricJsonImport ?? '').trim()
   if (!raw) return
   try {
@@ -889,7 +1019,8 @@ function handleImportRubricJson(job: JobItem) {
       ElMessage({ type: 'warning', message: 'JSON 中未找到有效的 dimensions，请检查格式' })
       return
     }
-    job.filter.resumeLlmConfig!.rubric = { knockouts, dimensions }
+    job.filter.rubric.knockouts = knockouts
+    job.filter.rubric.dimensions = dimensions
     job._rubricJsonImport = ''
     ElMessage({
       type: 'success',
@@ -901,8 +1032,8 @@ function handleImportRubricJson(job: JobItem) {
 }
 
 function addDimension(job: JobItem) {
-  ensureResumeLlmConfig(job)
-  job.filter.resumeLlmConfig!.rubric.dimensions.push({
+  ensureRubric(job)
+  job.filter.rubric.dimensions.push({
     name: '新维度',
     weight: 33,
     criteria: { '1': '', '3': '', '5': '' }
@@ -1044,7 +1175,6 @@ function addDimension(job: JobItem) {
   }
 
   .llm-rubric-panel {
-    margin-left: 24px;
     margin-top: 8px;
   }
 
@@ -1159,10 +1289,6 @@ function addDimension(job: JobItem) {
         margin-left: 8px;
       }
     }
-  }
-
-  .fallback-rule {
-    margin-top: 12px;
   }
 }
 </style>
