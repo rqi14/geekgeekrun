@@ -229,30 +229,14 @@ export const readBossJobsConfig = () => {
   if (!fs.existsSync(filePath)) {
     return { jobs: [] }
   }
-  let parsed
   try {
-    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    // 返回原始持久化结构（不在此处迁移/写回）。迁移仅在消费侧（getMergedJobConfig /
+    // jobFilterToCandidateFilter / jobFilterToChatPageFilter）内存中进行（migrateJobFilter 幂等且兼容新旧），
+    // 这样旧 UI 仍按原结构 hydrate、不会被自动改写丢数据；新 UI 保存时再写入四块结构。
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
   } catch {
     return { jobs: [] }
   }
-  // 读取时把每个职位的 filter 规整成四块结构（幂等）；若有变化原子写回，旧用户零感知升级。
-  if (parsed && Array.isArray(parsed.jobs)) {
-    let changed = false
-    const before = JSON.stringify(parsed)
-    parsed.jobs = parsed.jobs.map((job) => {
-      if (!job || typeof job !== 'object') return job
-      return { ...job, filter: migrateJobFilter(job.filter) }
-    })
-    if (JSON.stringify(parsed) !== before) changed = true
-    if (changed) {
-      try {
-        fs.writeFileSync(filePath, JSON.stringify(parsed))
-      } catch {
-        // 写回失败不致命：本次仍用已迁移的内存结构
-      }
-    }
-  }
-  return parsed
 }
 
 export const writeBossJobsConfig = async (config) => {
