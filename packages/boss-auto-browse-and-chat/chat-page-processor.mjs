@@ -703,6 +703,8 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
       } else {
         logInfo(`${LOG}   → 筛选不通过（${filterReason}），跳过`)
+        // 筛选不通过时也需关闭在线简历弹窗，否则弹窗遮挡下一个会话点击（表现为后续全部「会话切换未生效」）
+        await closeOnlineResumeIfOpen(page, { cursor })
         await logContact(encryptGeekId, 'resume_screened_out', null, filterReason || 'screened_out', hooks)
       }
 

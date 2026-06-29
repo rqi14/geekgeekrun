@@ -47,7 +47,14 @@ export async function closeOnlineResumeIfOpen (page, options = {}) {
   const clearCapturedText =
     typeof options.clearCapturedText === 'function' ? options.clearCapturedText : null
 
-  const isOpen = await page.$(CHAT_PAGE_ONLINE_RESUME_IFRAME_SELECTOR).catch(() => null)
+  // 双重检测：iframe src（精确）+ 模态容器可见性（兜底 BOSS 改版后 iframe src 变化或被自动移除但 backdrop 残留）
+  const isOpen = await page.evaluate((iframeSel) => {
+    if (document.querySelector(iframeSel)) return true
+    const dialog = document.querySelector('.resume-common-dialog')
+    if (!dialog) return false
+    const cs = getComputedStyle(dialog)
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0
+  }, CHAT_PAGE_ONLINE_RESUME_IFRAME_SELECTOR).catch(() => false)
   if (!isOpen) {
     return true
   }
