@@ -20,8 +20,8 @@
       </RouterLink>
 
       <div class="nav-sub-label">自动化执行</div>
-      <RouterLink :to="{ name: 'BossAutoBrowseAndChat' }">
-        推荐牛人 - 自动开聊
+      <RouterLink :to="{ name: 'RecommendAutomation' }">
+        推荐牛人
       </RouterLink>
       <RouterLink :to="{ name: 'BossChatPage' }">
         沟通

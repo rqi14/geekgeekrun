@@ -48,6 +48,7 @@ import { checkUpdateForUi } from '../../../features/updater'
 import gtag from '../../../utils/gtag'
 import { daemonEE, sendToDaemon } from '../connect-to-daemon'
 import { runCommon } from '../../../features/run-common'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 import { loginWithCookieAssistant } from '../../../features/login-with-cookie-assistant'
 import { configWithBrowserAssistant } from '../../../features/config-with-browser-assistant'
 import {
@@ -58,6 +59,110 @@ import {
 import { getLastUsedAndAvailableBrowser } from '../../DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import { waitForCommonJobConditionDone } from '../../../features/common-job-condition'
 import { ensureConfigFileExist } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+
+const forwardedWorkerExitHandlers = new Map<string, (message: any) => void>()
+const STOP_WORKER_TIMEOUT_MS = 15000
+
+function forwardWorkerExitOnce(workerId: string) {
+  if (forwardedWorkerExitHandlers.has(workerId)) {
+    return
+  }
+
+  const handler = (message: any) => {
+    if (message.workerId !== workerId || message.type !== 'worker-exited') {
+      return
+    }
+    mainWindow?.webContents.send('worker-exited', message)
+    if (!message.restarting) {
+      daemonEE.off('message', handler)
+      forwardedWorkerExitHandlers.delete(workerId)
+    }
+  }
+
+  forwardedWorkerExitHandlers.set(workerId, handler)
+  daemonEE.on('message', handler)
+}
+
+function waitForWorkerStopped(workerId: string) {
+  let cancel: (() => void) | null = null
+  const promise = new Promise<void>((resolve, reject) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+    let handler: (message: any) => void
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      daemonEE.off('message', handler)
+      clearTimeout(timer)
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    }
+    cancel = () => finish()
+    handler = (message: any) => {
+      if (message.workerId !== workerId) {
+        return
+      }
+      if (message.type === 'worker-exited' || message.type === 'worker-disconnected') {
+        finish()
+      }
+    }
+    timer = setTimeout(async () => {
+      try {
+        const status = await (sendToDaemon as any)(
+          { type: 'get-status' },
+          { needCallback: true, timeout: 3000 }
+        )
+        const stillRunning = status?.workers?.some((worker: any) => worker.workerId === workerId)
+        if (!stillRunning) {
+          finish()
+          return
+        }
+      } catch {
+        // Fall through to timeout error.
+      }
+      finish(new Error(`等待 ${workerId} 停止超时`))
+    }, STOP_WORKER_TIMEOUT_MS)
+
+    daemonEE.on('message', handler)
+  })
+  return {
+    promise,
+    cancel: () => cancel?.()
+  }
+}
+
+async function stopWorkerWithTimeout({
+  workerId,
+  stoppingChannel,
+  stoppedChannel
+}: {
+  workerId: string
+  stoppingChannel: string
+  stoppedChannel: string
+}) {
+  mainWindow?.webContents.send(stoppingChannel)
+  const stopped = waitForWorkerStopped(workerId)
+  try {
+    await (sendToDaemon as any)(
+      {
+        type: 'stop-worker',
+        workerId
+      },
+      {
+        needCallback: true,
+        timeout: 5000
+      }
+    )
+    await stopped.promise
+  } catch (error) {
+    stopped.cancel()
+    throw error
+  }
+  mainWindow?.webContents.send(stoppedChannel)
+}
 
 export default function initIpc() {
   ipcMain.handle('save-config-file-from-ui', async (ev, payload) => {
@@ -355,10 +460,10 @@ export default function initIpc() {
         })
         return
       }
-      const subProcessEnv = {
+      const subProcessEnv = buildUtf8ProcessEnv({
         ...process.env,
         PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable!.executablePath
-      }
+      })
       subProcessOfOpenBossSite = childProcess.spawn(
         process.argv[0],
         process.env.NODE_ENV === 'development'
@@ -471,6 +576,47 @@ export default function initIpc() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       return { ok: false, error: msg }
+    }
+  })
+  ipcMain.handle('boss-detect-brand', async (_, payload: {
+    baseURL: string
+    model: string
+    endpoint?: string
+    brand?: string
+  }) => {
+    try {
+      const { resolveModelFamily } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/families.mjs'
+      )
+      const { resolveDialect } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/dialects/index.mjs'
+      )
+      const { resolveModelProfile } = await import(
+        '@geekgeekrun/boss-auto-browse-and-chat/llm/profiles.mjs'
+      )
+      const family = resolveModelFamily(payload.model)
+      const dialect = resolveDialect({
+        baseURL: payload.baseURL,
+        brandLock: payload.brand ?? 'auto',
+        endpoint: payload.endpoint ?? 'auto',
+        family
+      })
+      const profile = resolveModelProfile({ dialect, family, userOverrides: {} })
+      return {
+        dialectId: dialect.id,
+        label: dialect.label,
+        isReasoningModel: family.isReasoningModel,
+        effortValues: profile.effortValues ?? null,
+        thinkingStyle: profile.thinkingStyle
+      }
+    } catch {
+      return {
+        dialectId: 'generic',
+        label: '通用兼容',
+        isReasoningModel: false,
+        effortValues: null,
+        thinkingStyle: 'top_level_enable'
+      }
     }
   })
   // ── end 招聘端 LLM 配置窗口 ──────────────────────────────────────────────────
@@ -711,84 +857,34 @@ export default function initIpc() {
     return result
   })
 
-  ipcMain.handle('run-boss-recommend', async () => {
+  ipcMain.handle('run-boss-recommend', async (_, payload?: { jobId?: string | null }) => {
     const mode = 'bossRecommendMain'
-    const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    const { runRecordId } = await runCommon({ mode, jobId: payload?.jobId ?? null })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-recommend', async () => {
-    mainWindow?.webContents.send('boss-recommend-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossRecommendMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossRecommendMain',
+      stoppingChannel: 'boss-recommend-stopping',
+      stoppedChannel: 'boss-recommend-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossRecommendMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-recommend-stopped')
   })
 
   ipcMain.handle('run-boss-chat-page', async () => {
     const mode = 'bossChatPageMain'
     const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-chat-page', async () => {
-    mainWindow?.webContents.send('boss-chat-page-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossChatPageMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossChatPageMain',
+      stoppingChannel: 'boss-chat-page-stopping',
+      stoppedChannel: 'boss-chat-page-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossChatPageMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-chat-page-stopped')
   })
 
   // ── 招聘端调试工具 ──────────────────────────────────────────────────────────
@@ -807,6 +903,23 @@ export default function initIpc() {
     }
     bossChatDebugProcess = null
     bossChatDebugReadyDefer = null
+  }
+
+  // 推荐牛人页调试 worker（与沟通页调试同构，独立进程/状态）
+  let bossRecommendDebugProcess: ChildProcess | null = null
+  let bossRecommendDebugReadyDefer: PromiseWithResolvers<void> | null = null
+  const bossRecommendDebugPendingCmds = new Map<string, PromiseWithResolvers<any>>()
+
+  const closeBossRecommendDebug = () => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      try {
+        bossRecommendDebugProcess.kill('SIGTERM')
+      } catch {
+        // 进程可能已退出（如用户关闭浏览器），忽略
+      }
+    }
+    bossRecommendDebugProcess = null
+    bossRecommendDebugReadyDefer = null
   }
 
   ipcMain.handle('open-boss-chat-debug', async (ev) => {
@@ -832,7 +945,11 @@ export default function initIpc() {
         ? [process.argv[1], '--mode=bossChatDebugMain']
         : ['--mode=bossChatDebugMain'],
       {
-        env: { ...process.env, PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath, GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME },
+        env: buildUtf8ProcessEnv({
+          ...process.env,
+          PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath,
+          GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME
+        }),
         stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe']
       }
     )
@@ -901,46 +1018,116 @@ export default function initIpc() {
     closeBossChatDebug()
     return { ok: true }
   })
+
+  // ── 推荐牛人页调试 worker ───────────────────────────────────────────────────
+  ipcMain.handle('open-boss-recommend-debug', async (ev) => {
+    if (bossRecommendDebugProcess && !bossRecommendDebugProcess.killed) {
+      return { ok: true, alreadyRunning: true }
+    }
+    let puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+    if (!puppeteerExecutable) {
+      try {
+        const parent = BrowserWindow.fromWebContents(ev.sender) || undefined
+        await configWithBrowserAssistant({ autoFind: true, windowOption: { parent, modal: !!parent, show: true } })
+        puppeteerExecutable = await getLastUsedAndAvailableBrowser()
+      } catch { /**/ }
+    }
+    if (!puppeteerExecutable) {
+      return { ok: false, error: 'NO_BROWSER' }
+    }
+    bossRecommendDebugReadyDefer = Promise.withResolvers()
+    bossRecommendDebugProcess = childProcess.spawn(
+      process.argv[0],
+      process.env.NODE_ENV === 'development'
+        ? [process.argv[1], '--mode=bossRecommendDebugMain']
+        : ['--mode=bossRecommendDebugMain'],
+      {
+        env: { ...process.env, PUPPETEER_EXECUTABLE_PATH: puppeteerExecutable.executablePath, GEEKGEEKRUND_PIPE_NAME: process.env.GEEKGEEKRUND_PIPE_NAME },
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe']
+      }
+    )
+    bossRecommendDebugProcess.once('exit', () => {
+      bossRecommendDebugProcess = null
+      bossRecommendDebugReadyDefer = null
+      mainWindow?.webContents.send('boss-recommend-debug-exited')
+      for (const [, defer] of bossRecommendDebugPendingCmds) {
+        defer.reject(new Error('worker exited'))
+      }
+      bossRecommendDebugPendingCmds.clear()
+    })
+    ;(bossRecommendDebugProcess.stdio[4] as NodeJS.ReadableStream).pipe(JSONStream.parse()).on('data', (msg: any) => {
+      if (msg?.type === 'READY') {
+        if (msg.ok) {
+          bossRecommendDebugReadyDefer?.resolve()
+          mainWindow?.webContents.send('boss-recommend-debug-ready')
+        } else {
+          bossRecommendDebugReadyDefer?.reject(new Error(msg.error ?? 'READY failed'))
+        }
+        return
+      }
+      if (msg?.id) {
+        const defer = bossRecommendDebugPendingCmds.get(msg.id)
+        if (defer) {
+          bossRecommendDebugPendingCmds.delete(msg.id)
+          if (msg.ok) { defer.resolve(msg.result) } else { defer.reject(new Error(msg.error ?? 'command failed')) }
+        }
+      }
+    })
+    try {
+      await bossRecommendDebugReadyDefer.promise
+      return { ok: true }
+    } catch (err: any) {
+      closeBossRecommendDebug()
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('boss-recommend-debug-command', async (_, cmd: { type: string; [k: string]: any }) => {
+    if (!bossRecommendDebugProcess || bossRecommendDebugProcess.killed) {
+      return { ok: false, error: 'DEBUG_WORKER_NOT_RUNNING' }
+    }
+    const id = Math.random().toString(36).slice(2)
+    const defer = Promise.withResolvers<any>()
+    bossRecommendDebugPendingCmds.set(id, defer)
+    pipeWriteRegardlessError(
+      bossRecommendDebugProcess.stdio[3] as WriteStream,
+      JSON.stringify({ ...cmd, id }) + '\n'
+    )
+    // dry-run-sequence 是整轮（多候选人开简历 + 每人一次 LLM 精评，单次可能 30s），需很长超时；
+    // applyNativeFilter 含人类光标多次点击 + 等列表稳定，可能逼近 60s。其余默认 60s。
+    const cmdTimeoutMs =
+      cmd.type === 'dry-run-sequence' ? 600000 : cmd.type === 'apply-native-filter' ? 150000 : 60000
+    try {
+      const result = await Promise.race([
+        defer.promise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), cmdTimeoutMs))
+      ])
+      return { ok: true, result }
+    } catch (err: any) {
+      bossRecommendDebugPendingCmds.delete(id)
+      return { ok: false, error: err?.message }
+    }
+  })
+
+  ipcMain.handle('close-boss-recommend-debug', () => {
+    closeBossRecommendDebug()
+    return { ok: true }
+  })
   // ── end 招聘端调试工具 ───────────────────────────────────────────────────────
 
   ipcMain.handle('run-boss-auto-browse-and-chat', async () => {
     const mode = 'bossAutoBrowseAndChatMain'
     const { runRecordId } = await runCommon({ mode })
-    daemonEE.on('message', function handler(message) {
-      if (message.workerId !== mode) {
-        return
-      }
-      if (message.type === 'worker-exited') {
-        mainWindow?.webContents.send('worker-exited', message)
-      }
-    })
+    forwardWorkerExitOnce(mode)
     return { runRecordId }
   })
 
   ipcMain.handle('stop-boss-auto-browse-and-chat', async () => {
-    mainWindow?.webContents.send('boss-auto-browse-and-chat-stopping')
-    const p = new Promise((resolve) => {
-      daemonEE.on('message', function handler(message) {
-        if (message.workerId !== 'bossAutoBrowseAndChatMain') {
-          return
-        }
-        if (message.type === 'worker-exited') {
-          daemonEE.off('message', handler)
-          resolve(undefined)
-        }
-      })
+    await stopWorkerWithTimeout({
+      workerId: 'bossAutoBrowseAndChatMain',
+      stoppingChannel: 'boss-auto-browse-and-chat-stopping',
+      stoppedChannel: 'boss-auto-browse-and-chat-stopped'
     })
-    await sendToDaemon(
-      {
-        type: 'stop-worker',
-        workerId: 'bossAutoBrowseAndChatMain'
-      },
-      {
-        needCallback: true
-      }
-    )
-    await p
-    mainWindow?.webContents.send('boss-auto-browse-and-chat-stopped')
   })
 
   ipcMain.handle('check-boss-recruiter-cookie-file', async () => {
@@ -996,6 +1183,12 @@ export default function initIpc() {
         bossRecruiterConfig.advanced.persistProfile = payload.advanced.persistProfile
       }
     }
+    if (hasOwn(payload, 'scoring') && payload.scoring && typeof payload.scoring === 'object') {
+      bossRecruiterConfig.scoring = {
+        ...bossRecruiterConfig.scoring,
+        ...payload.scoring
+      }
+    }
 
     const candidateFilterConfig = readBossConfigFile('candidate-filter.json') || {}
     if (hasOwn(payload, 'expectCityList')) {
@@ -1021,6 +1214,12 @@ export default function initIpc() {
     }
     if (hasOwn(payload, 'skipViewedCandidates')) {
       candidateFilterConfig.skipViewedCandidates = payload.skipViewedCandidates
+    }
+    if (hasOwn(payload, 'expectSchoolKeywords')) {
+      candidateFilterConfig.expectSchoolKeywords = payload.expectSchoolKeywords
+    }
+    if (hasOwn(payload, 'expectMajorKeywords')) {
+      candidateFilterConfig.expectMajorKeywords = payload.expectMajorKeywords
     }
 
     return await Promise.all([

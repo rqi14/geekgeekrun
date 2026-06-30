@@ -1,3 +1,4 @@
+import '@geekgeekrun/utils/process-text-encoding-register.mjs'
 import overrideConsole from './utils/overrideConsole'
 import minimist from 'minimist'
 import { runCommon } from './features/run-common'
@@ -13,7 +14,8 @@ console.log('NODE_ENV:', process.env.NODE_ENV)
 
 // 捕获未处理的 EPIPE 错误
 process.on('uncaughtException', (err) => {
-  if (err?.code === 'EPIPE' || err?.code === 'ERR_STREAM_DESTROYED') {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED') {
     return
   }
   throw err
@@ -85,6 +87,13 @@ const runMode = commandlineArgs['mode']
     case 'bossChatDebugMain': {
       const { waitForProcessHandShakeAndRunDebug } = await import(
         './flow/BOSS_CHAT_DEBUG_MAIN/index'
+      )
+      waitForProcessHandShakeAndRunDebug()
+      break
+    }
+    case 'bossRecommendDebugMain': {
+      const { waitForProcessHandShakeAndRunDebug } = await import(
+        './flow/BOSS_RECOMMEND_DEBUG_MAIN/index'
       )
       waitForProcessHandShakeAndRunDebug()
       break

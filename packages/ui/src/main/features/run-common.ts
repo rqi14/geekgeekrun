@@ -3,8 +3,9 @@ import { AUTO_CHAT_ERROR_EXIT_CODE } from '../../common/enums/auto-start-chat'
 import { daemonEE, sendToDaemon } from '../flow/OPEN_SETTING_WINDOW/connect-to-daemon'
 import { saveAndGetCurrentRunRecord } from '../flow/OPEN_SETTING_WINDOW/utils/db'
 import minimist from 'minimist'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 
-export async function runCommon({ mode }) {
+export async function runCommon({ mode, jobId }: { mode: string; jobId?: string | null }) {
   await sendToDaemon(
     {
       type: 'user-process-register'
@@ -13,16 +14,15 @@ export async function runCommon({ mode }) {
       needCallback: true
     }
   )
-  const taskList = (
-    await sendToDaemon(
-      {
-        type: 'get-status'
-      },
-      {
-        needCallback: true
-      }
-    )
-  )?.workers
+  const statusResult = (await sendToDaemon(
+    {
+      type: 'get-status'
+    },
+    {
+      needCallback: true
+    }
+  )) as { workers?: Array<{ workerId: string; args?: string[] }> } | undefined
+  const taskList = statusResult?.workers
   const runningTask = taskList?.find((it) => it.workerId === mode)
   if (runningTask) {
     const commandlineArgs = minimist(runningTask.args ?? [])
@@ -33,7 +33,8 @@ export async function runCommon({ mode }) {
       isAlreadyRunning: true
     }
   }
-  const currentRunRecord = (await saveAndGetCurrentRunRecord())?.data
+  const currentRunRecord = ((await saveAndGetCurrentRunRecord()) as { data?: { id?: number } })
+    ?.data
   const subProcessEnv = {
     ...process.env,
     GEEKGEEKRUND_NO_AUTO_RESTART_EXIT_CODE: [
@@ -46,19 +47,20 @@ export async function runCommon({ mode }) {
     process.env.NODE_ENV === 'development'
       ? [resolve(process.argv[1]), `--mode=${mode}`, `--run-record-id=${currentRunRecord?.id || 0}`]
       : [`--mode=${mode}`, `--run-record-id=${currentRunRecord?.id || 0}`]
+  if (jobId) args.push(`--job-id=${jobId}`)
   await sendToDaemon(
     {
       type: 'start-worker',
       workerId: mode,
       command: process.argv[0],
       args,
-      env: subProcessEnv
+      env: buildUtf8ProcessEnv(subProcessEnv)
     },
     {
       needCallback: true
     }
   )
-  daemonEE.on('message', (message) => {
+  daemonEE.on('message', function handler(message) {
     if (message.type === 'worker-exited') {
       if (
         message.workerId === mode &&
@@ -66,6 +68,9 @@ export async function runCommon({ mode }) {
         globalThis.GEEKGEEKRUN_PROCESS_ROLE !== 'ui'
       ) {
         process.exit(0)
+      }
+      if (message.workerId === mode && !message.restarting) {
+        daemonEE.off('message', handler)
       }
     }
   })

@@ -28,6 +28,11 @@ pnpm -F geekgeekrun-ui format        # prettier --write
 # Type checking (run from packages/ui)
 pnpm -F geekgeekrun-ui typecheck     # both node + web
 
+# Tests (run from repo root) — node:test, no extra runner
+pnpm test                            # all packages' tests (pnpm -r --if-present test)
+pnpm -F @geekgeekrun/boss-auto-browse-and-chat test   # recruiter core (node --test)
+pnpm -F geekgeekrun-ui test          # ui pure-logic (Node 24 native TS, .test.ts/.test.mjs)
+
 # SQLite plugin (must build before UI if changed)
 pnpm -F @geekgeekrun/sqlite-plugin build
 pnpm -F @geekgeekrun/sqlite-plugin dev   # watch mode

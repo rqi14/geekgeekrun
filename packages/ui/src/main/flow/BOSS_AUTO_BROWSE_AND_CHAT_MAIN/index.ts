@@ -39,55 +39,6 @@ const log = (msg: string) => {
   console.log(`[boss-worker] ${msg}`)
 }
 
-const checkForBossVerification = async (page: any): Promise<boolean> => {
-  try {
-    const url: string = page.url()
-    if (/verify|captcha|security.?check|safe\b|\/safe\/|安全验证/.test(url)) return true
-    return await page.evaluate(() => {
-      const hasVerifyText = /请完成.{0,10}验证|安全验证|滑动.{0,6}滑块|人机验证|完成验证后继续|异常.{0,6}操作|验证码/.test(
-        document.body?.innerText || ''
-      )
-      const hasVerifyEl = !!(
-        document.querySelector('#nc_mask') ||
-        document.querySelector('.verify-container') ||
-        document.querySelector('.captcha-wrap') ||
-        document.querySelector('.nc-container') ||
-        document.querySelector('[class*="verify"][class*="wrap"]') ||
-        document.querySelector('[class*="captcha"]')
-      )
-      return hasVerifyText || hasVerifyEl
-    })
-  } catch {
-    return false
-  }
-}
-
-const waitForBossVerificationCompletion = async (page: any, expectedUrlPrefix: string): Promise<boolean> => {
-  log('⚠️  检测到 BOSS 安全验证，请在浏览器窗口中手动完成验证，完成后将自动继续...')
-  const { showManualVerificationAlert } = (await import(
-    '@geekgeekrun/boss-auto-browse-and-chat/manual-verification-alert.mjs'
-  )) as any
-  await showManualVerificationAlert({
-    key: 'boss-auto-browse-and-chat-main',
-    logger: log
-  })
-
-  const deadline = Date.now() + 5 * 60 * 1000
-  while (Date.now() < deadline) {
-    await sleep(2000)
-    try {
-      const url: string = page.url()
-      const isStillVerify = await checkForBossVerification(page)
-      if (url.startsWith(expectedUrlPrefix) && !isStillVerify) {
-        log('✅ 安全验证已完成，继续处理...')
-        return true
-      }
-    } catch { /* 页面可能正在跳转，继续等待 */ }
-  }
-  log('验证等待超时（5 分钟），将重启浏览器重试')
-  return false
-}
-
 const runAutoBrowseAndChat = async () => {
   app.dock?.hide()
   log('runAutoBrowseAndChat 开始')
@@ -133,7 +84,7 @@ const runAutoBrowseAndChat = async () => {
     default: (hooks: any, opts?: { returnBrowser?: boolean; jobId?: string; browser?: any; page?: any }) => Promise<void | { browser: any; page: any }>
     startBossChatPageProcess: (hooks: any, options?: { browser?: any; page?: any; jobId?: string }) => Promise<void>
     initPuppeteer: () => Promise<any>
-    launchBrowserAndNavigateToChat?: () => Promise<{ browser: any; page: any }>
+    launchBrowserAndNavigateToChat: () => Promise<{ browser: any; page: any }>
     bossAutoBrowseEventBus: InstanceType<typeof import('node:events').EventEmitter>
   }
   const {
@@ -229,7 +180,7 @@ const runAutoBrowseAndChat = async () => {
             runId,
             timestamp,
             summary: { total: 1, matched: 1, skipped: 0 },
-            candidates: [entry]
+            candidates: [entry] as Parameters<typeof sendWebhook>[1]['candidates']
           }
           log(`webhook 实时发送 1 条候选人...`)
           await sendWebhook(normalized, webhookPayload, { storageDir: storageFilePath })

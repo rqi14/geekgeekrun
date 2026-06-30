@@ -29,6 +29,9 @@ export const CANDIDATE_DETAIL_SELECTOR = ''
 /** 5. 打招呼按钮（在单条 item 的 div.operate-side 内） */
 export const CHAT_START_BUTTON_SELECTOR = 'button.btn-greet'
 
+/** 列表卡内的打招呼按钮（在 li.card-item 作用域内查询，不开简历直接招呼） */
+export const CARD_GREET_BTN_SELECTOR = 'button.btn-greet'
+
 /** "已向牛人发送招呼"弹窗内的"知道了"按钮（弹窗在主页面，不在 iframe 内） */
 export const GREETING_SENT_KNOW_BTN_SELECTOR = 'div.dialog-wrap button.btn-sure-v2'
 
@@ -70,7 +73,77 @@ export const NOT_INTERESTED_REASON_FALLBACK = '其他原因'
 /** 原因弹窗的关闭图标（未匹配到原因时点击以关闭弹窗，避免卡住后续操作） */
 export const NOT_INTERESTED_REASON_POPUP_CLOSE_SELECTOR = 'div.card-reason-f1.show div.close-icon'
 
-/** 推荐页：简历详情弹窗的关闭按钮（主页面，非 iframe 内） */
+/** 原因弹窗的「提交」按钮。选具体原因通常即时生效并关闭；个别情况（如选「其他原因」填完文字）需点提交。 */
+export const NOT_INTERESTED_REASON_SUBMIT_SELECTOR =
+  'div.card-reason-f1.show .my-subbmit button.btn, div.card-reason-f1.show .feed-back-list button.btn'
+
+// ── 推荐牛人页重构 v2 选择器（对照 dev/snapshots/ 校验） ──
+
+/** 主候选卡：li.card-item 内的主卡 card-inner（带 data-geek）。排除 similar-geek-wrap/quick-top。 */
+export const PRIMARY_CARD_INNER_SELECTOR = 'li.card-item > div.candidate-card-wrap > div.card-inner[data-geek]'
+/** li.card-item 内若含此元素则为"相似推荐"块，整条跳过 */
+export const SIMILAR_WRAP_SELECTOR = 'div.similar-geek-wrap'
+
+/** 简历弹窗（recommendFrame 内）容器 */
+export const RESUME_MODAL_SELECTOR = 'div.dialog-wrap.active .dialog-lib-resume'
+/** 简历弹窗内"打招呼"按钮 */
+export const RESUME_GREET_BTN_SELECTOR = '.button-chat-wrap.resumeGreet button.btn-greet'
+/** 简历弹窗内打招呼成功信号（按钮变"继续沟通"） */
+export const RESUME_GREET_DONE_SELECTOR = '.button-chat-wrap .btn-continue-wrap, .button-chat-wrap button.btn-outline-v2'
+/** 简历弹窗内"经历概览"文本容器 */
+export const RESUME_SUMMARY_SELECTOR = '.resume-right-side .resume-summary'
+/** 简历弹窗关闭按钮（在 recommendFrame 内的弹窗上，非主页面） */
+export const RESUME_MODAL_CLOSE_SELECTOR = 'div.dialog-wrap.active .dialog-lib-resume .close-btn'
+
+// ===== 推荐页原生「筛选」面板（服务端预筛，主页面 #headerWrap 内；列表在 recommendFrame）=====
+// 选择器均按实测 filter-panel HTML 核定。触发器在主页面（#headerWrap=职位下拉同层，主页面），
+// driver 仍 page→frame 双查以防站点差异。
+/** 筛选按钮（点击展开 .filter-panel）。实测路径：#headerWrap … .recommend-filter.op-filter > div > div */
+export const FILTER_PANEL_TRIGGER_SELECTOR = '.recommend-filter.op-filter > div > div'
+export const FILTER_PANEL_SELECTOR = '.filter-panel'
+/** VIP 高级筛选包裹；含 .vip-mask（锁）与 .vip-folded（折叠展开钮） */
+export const FILTER_VIP_WRAP_SELECTOR = '.filter-panel .vip-filters-wrap'
+export const FILTER_VIP_FOLDED_SELECTOR = '.filter-panel .vip-filters-wrap .vip-folded'
+export const FILTER_VIP_MASK_SELECTOR = '.filter-panel .vip-filters-wrap .vip-mask'
+/** 折叠态标记：.vip-filters-wrap 含此 class 表示当前折叠（需点 vip-folded 展开）。实测 HTML：class="vip-filters-wrap show-folded" */
+export const FILTER_VIP_FOLDED_STATE_CLASS = 'show-folded'
+/** 某维度的选项组容器；用法：`${FILTER_PANEL_SELECTOR} .check-box.${groupClass}` */
+export const filterGroupSelector = (groupClass) => `${FILTER_PANEL_SELECTOR} .check-box.${groupClass}`
+/** 组内单个选项（.default.option 是「不限」复位项）；major 的 .option 嵌在 .popover 里，故用后代匹配 */
+export const FILTER_OPTION_SELECTOR = '.option'
+export const FILTER_OPTION_DEFAULT_SELECTOR = '.default.option'
+/** 选项选中态 class。实测 HTML：选中项为 class="... option active" */
+export const FILTER_OPTION_ACTIVE_CLASS = 'active'
+/** 底部按钮：优先按文案匹配，class 仅回退。实测 HTML：确定 <div class="btn">、清除 <div class="btn btn-outline default"> */
+export const FILTER_BTNS_SELECTOR = '.filter-panel .btns .btn'
+export const FILTER_CONFIRM_TEXT = '确定'
+export const FILTER_CLEAR_TEXT = '清除'
+// 注：筛选后是否零结果，driver 直接数 CANDIDATE_ITEM_SELECTOR 的卡片数判断，不依赖任何"空态屏"选择器。
+
+/** 账号封禁文案（不可恢复 → 中止）。真机需再核对精确字符串。 */
+export const ACCOUNT_BANNED_TEXT_REGEXP = /账号.*不可使用|不可使用状态|登录\s*BOSS直聘手机APP查看详情/
+/** 今日额度用尽文案 */
+export const QUOTA_BLOCKED_TEXT_REGEXP = /今日.*(招呼|沟通).*上限|已达上限|超过.*上限/
+/** VIP 业务拦截弹窗（额度耗尽点击后弹出）的稳定 class 关键字；ID/文案不稳，按 class 判 */
+export const BUSINESS_BLOCK_DIALOG_CLASS_NEEDLE = 'business-block'
+/** 业务拦截弹窗的关闭按钮（右上角 X） */
+export const BUSINESS_BLOCK_DIALOG_CLOSE_SELECTOR =
+  '.business-block-wrap .boss-popup__close, .business-block-dialog .boss-popup__close'
+
+/** 模糊原因规则：internalReason → 选项文案需包含的子串（按序取第一个命中的选项；都不中用 NOT_INTERESTED_REASON_FALLBACK） */
+export const NOT_INTERESTED_FUZZY_RULES = {
+  city: ['距离远'],
+  education: ['不考虑'],
+  workExp: ['与职位不符', '工作经历'],
+  skills: ['与职位不符', '工作经历'],
+  salary: ['薪资'],
+  school: ['院校', '学历', '与职位不符'],
+  major: ['专业', '与职位不符'],
+  viewed: ['重复推荐'],
+  blockName: ['其他原因']
+}
+
+/** @deprecated 推荐页简历弹窗在 iframe 内，关闭用 RESUME_MODAL_CLOSE_SELECTOR；此主页面选择器仅保留给旧沟通页路径 */
 export const RESUME_POPUP_CLOSE_SELECTOR = 'div.boss-popup__close'
 
 /** @deprecated 招呼为自动发送，无需弹窗输入框；若需在弹窗内编辑招呼语可再用 */
@@ -101,6 +174,13 @@ export const RECOMMEND_JOB_ITEM_SELECTOR = '#headerWrap ul.job-list li.job-item'
 export const CHAT_PAGE_JOB_DROPDOWN_SELECTOR = '.dropmenu-label.chat-select-job'
 /** 沟通页：职位下拉展开后的列表项（过滤 value="-1" 的"全部职位"） */
 export const CHAT_PAGE_JOB_ITEM_SELECTOR = '.chat-top-job .ui-dropmenu-list li'
+
+/** 顶部导航"账号权益"入口（ka 埋点 key 稳，文案兜底） */
+export const ACCOUNT_RIGHTS_NAV_SELECTOR = '[ka="header_nav_rights"]'
+/** 账号权益侧栏内的 iframe（路径稳，class 哈希不稳） */
+export const PRIVILEGE_IFRAME_SELECTOR = 'iframe[src*="/mpa/v3/html/vip/privilege"]'
+/** 账号权益侧栏关闭按钮 */
+export const PRIVILEGE_PANEL_CLOSE_SELECTOR = '.iframe-box-wrap .iframe-close, .iframe-box-content .iframe-close'
 
 // =============================================================================
 // 二、沟通页（/web/chat/index）— 会话列表、要简历、预览附件、下载 PDF

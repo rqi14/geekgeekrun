@@ -178,7 +178,22 @@ function normalizeSalaryRangeToK (range) {
   return [min, max]
 }
 
-/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'blockName'|'viewed'} FilterResultReason */
+/**
+ * 安全编译正则：无效模式返回 null（视为该规则不生效），避免整轮运行因用户填错正则而崩溃。
+ * @param {string} pattern
+ * @param {string} [flags]
+ * @returns {RegExp|null}
+ */
+function safeRegExp (pattern, flags) {
+  if (!pattern || typeof pattern !== 'string') return null
+  try {
+    return new RegExp(pattern, flags)
+  } catch {
+    return null
+  }
+}
+
+/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'school'|'major'|'blockName'|'viewed'} FilterResultReason */
 
 /**
  * 按 candidate-filter 配置筛选候选人
@@ -191,10 +206,14 @@ function normalizeSalaryRangeToK (range) {
  *   expectSalaryRange?: [number, number],
  *   expectSalaryWhenNegotiable?: 'exclude'|'include',
  *   expectSkillKeywords?: string[],
+ *   expectSchoolKeywords?: string[],
+ *   expectMajorKeywords?: string[],
  *   blockCandidateNameRegExpStr?: string,
  *   skipViewedCandidates?: boolean
  * }} filterConfig
  * expectSalaryWhenNegotiable: 候选人薪资为"面议"或无法解析时：'exclude'=不通过，'include'=通过
+ * expectSchoolKeywords: 命中候选人学校名(schools)或档次标签(tags，如 双一流/QS前500院校)任一子串即通过
+ * expectMajorKeywords: 命中候选人专业(majors)任一子串即通过
  * @returns {{ matched: Array<{ candidate: object, filterResult: { matched: true } }>, skipped: Array<{ candidate: object, filterResult: { matched: false, reason: FilterResultReason } }> }}
  */
 export function filterCandidates (candidates, filterConfig) {
@@ -206,13 +225,13 @@ export function filterCandidates (candidates, filterConfig) {
     expectSalaryRange = [0, 0],
     expectSalaryWhenNegotiable = 'exclude',
     expectSkillKeywords = [],
+    expectSchoolKeywords = [],
+    expectMajorKeywords = [],
     blockCandidateNameRegExpStr = '',
     skipViewedCandidates = false
   } = filterConfig || {}
 
-  const blockNameReg = blockCandidateNameRegExpStr
-    ? new RegExp(blockCandidateNameRegExpStr, 'i')
-    : null
+  const blockNameReg = safeRegExp(blockCandidateNameRegExpStr, 'i')
 
   const matched = []
   const skipped = []
@@ -254,9 +273,10 @@ export function filterCandidates (candidates, filterConfig) {
 
     const educationRegExpStr = expectEducationRegExpStr ||
       (Array.isArray(expectEducationList) && expectEducationList.length ? expectEducationList.join('|') : '')
-    if (educationRegExpStr) {
+    const educationReg = safeRegExp(educationRegExpStr)
+    if (educationReg) {
       const education = (candidate.education ?? '').trim()
-      if (!education || !new RegExp(educationRegExpStr).test(education)) {
+      if (!education || !educationReg.test(education)) {
         skipped.push({
           candidate,
           filterResult: {
@@ -334,6 +354,45 @@ export function filterCandidates (candidates, filterConfig) {
       }
     }
 
+    // 学校：命中学校名(schools)或档次标签(tags)任一即通过；候选人无学校/标签数据时按未匹配处理
+    if (Array.isArray(expectSchoolKeywords) && expectSchoolKeywords.length) {
+      const schoolHay = [
+        ...(Array.isArray(candidate.schools) ? candidate.schools : []),
+        ...(Array.isArray(candidate.tags) ? candidate.tags : [])
+      ]
+        .join(' ')
+        .toLowerCase()
+      const hasMatch = expectSchoolKeywords.some((kw) => schoolHay.includes((kw ?? '').toLowerCase()))
+      if (!hasMatch) {
+        skipped.push({
+          candidate,
+          filterResult: {
+            matched: false,
+            reason: 'school',
+            reasonDetail: `期望院校关键词 ${expectSchoolKeywords.join('、')}，候选人学校/档次标签中未匹配`
+          }
+        })
+        continue
+      }
+    }
+
+    // 专业：命中候选人专业(majors)任一子串即通过
+    if (Array.isArray(expectMajorKeywords) && expectMajorKeywords.length) {
+      const majorHay = (Array.isArray(candidate.majors) ? candidate.majors : []).join(' ').toLowerCase()
+      const hasMatch = expectMajorKeywords.some((kw) => majorHay.includes((kw ?? '').toLowerCase()))
+      if (!hasMatch) {
+        skipped.push({
+          candidate,
+          filterResult: {
+            matched: false,
+            reason: 'major',
+            reasonDetail: `期望专业关键词 ${expectMajorKeywords.join('、')}，候选人专业中未匹配`
+          }
+        })
+        continue
+      }
+    }
+
     matched.push({
       candidate,
       filterResult: { matched: true }
@@ -344,6 +403,8 @@ export function filterCandidates (candidates, filterConfig) {
 }
 
 /**
+ * @deprecated 推荐页已改用 recommend/orchestrator 的有上限 scrollGently；无界滚动会触发账号风控
+ *   （见 memory/recommend-scroll-ban.md 与 docs/superpowers/specs/2026-06-11-...）。保留导出以防外部引用。
  * 滚动页面以加载更多候选人；检测是否已到底部（如“没有更多”提示）。
  * 使用拟人滚轮：page.mouse.wheel() 小步、随机延迟，替代一次性 window.scrollBy，以规避 BOSS 滚动埋点。
  *

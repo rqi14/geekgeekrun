@@ -86,6 +86,7 @@ import {
   RUNNING_STATUS_ENUM
 } from '../../../../common/enums/auto-start-chat'
 import { gtagRenderer } from '@renderer/utils/gtag'
+import { ElNotification } from 'element-plus'
 const props = defineProps({
   workerId: {
     type: String
@@ -208,6 +209,20 @@ function messageHandler(ev, { data }) {
     }
     return
   }
+  if (
+    data.type === 'boss-auto-browse-notice' &&
+    data.workerId === props.workerId &&
+    (data.runRecordId == null || data.runRecordId === props.runRecordId)
+  ) {
+    ElNotification({
+      title: '评分提醒',
+      message: data.message,
+      type: data.level === 'warning' ? 'warning' : 'info',
+      duration: 0,
+      position: 'top-right'
+    })
+    return
+  }
   if (data.type !== 'prerequisite-step-by-step-check' || data.runRecordId !== props.runRecordId) {
     return
   }
@@ -242,11 +257,14 @@ defineExpose({
   show,
   hide
 })
-ipcRenderer.on('worker-exited', (ev, payload) => {
-  const { workerId, code } = payload
+function workerExitedHandler(
+  _ev: unknown,
+  payload: { workerId?: string; code?: number; runRecordId?: number | null }
+) {
+  const { workerId, code, runRecordId } = payload
   if (
-    workerId !== props.workerId
-    // || runRecordId !== props.runRecordId
+    workerId !== props.workerId ||
+    (runRecordId != null && props.runRecordId != null && runRecordId !== props.runRecordId)
   ) {
     return
   }
@@ -263,7 +281,9 @@ ipcRenderer.on('worker-exited', (ev, payload) => {
       workerId: props.workerId
     })
   }
-})
+}
+const unListenWorkerExited = ipcRenderer.on('worker-exited', workerExitedHandler)
+onUnmounted(unListenWorkerExited)
 </script>
 
 <style lang="scss">

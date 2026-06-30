@@ -1,6 +1,8 @@
+import '@geekgeekrun/utils/process-text-encoding-register.mjs'
 import path from 'node:path'
 import * as url from 'node:url'
 import { sleep } from '@geekgeekrun/utils/sleep.mjs'
+import { buildUtf8ProcessEnv } from '@geekgeekrun/utils/process-text-encoding.mjs'
 import childProcess from 'node:child_process'
 import { BOSS_AUTO_ERROR_EXIT_CODE } from './enums.mjs'
 
@@ -20,10 +22,10 @@ function runWithDaemon () {
     [path.join(__dirname, 'main.mjs')],
     {
       stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'ipc'],
-      env: {
+      env: buildUtf8ProcessEnv({
         ...process.env,
         MAIN_BOSS_AUTO_BROWSE_RERUN_INTERVAL: rerunInterval
-      }
+      })
     }
   )
 

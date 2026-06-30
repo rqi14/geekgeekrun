@@ -7,6 +7,7 @@
     "src/preload/*.d.ts",
     "src/common/**/*"
   ],
+  "exclude": ["**/*.test.ts", "**/*.test.mjs", "**/*.test.js"],
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",

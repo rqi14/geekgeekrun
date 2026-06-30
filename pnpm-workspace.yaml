@@ -1,13 +1,11 @@
 packages:
   - 'packages/*'
-
+allowBuilds:
+  '@parcel/watcher': true
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+  puppeteer: true
 patchedDependencies:
   find-chrome-bin@2.0.4: patches/find-chrome-bin@2.0.4.patch
   puppeteer-extra-plugin-anonymize-ua@2.4.6: patches/puppeteer-extra-plugin-anonymize-ua@2.4.6.patch
-
-onlyBuiltDependencies:
-  - '@parcel/watcher'
-  - better-sqlite3
-  - electron
-  - esbuild
-  - puppeteer
