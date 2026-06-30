@@ -28,6 +28,8 @@ export function summarizeScoreResult (result) {
     resumeChars: result?.resumeChars ?? 0,
     summaryChars: result?.summaryChars ?? 0,
     canvasOk: result?.canvasOk === true,
+    resumeVerified: result?.resumeVerified === true,
+    resumeEvidence: result?.resumeEvidence || 'none',
     llmError: result?.llmError === true
   }
 }
@@ -41,7 +43,7 @@ export function summarizeGreetSelection (scored, selected, minScore) {
       if (!selected) {
         if (entry?.hardReject) skippedReason = 'hardReject'
         else if (typeof entry?.score !== 'number' || entry.score < minScore) skippedReason = 'belowThreshold'
-        else if (entry?.canvasOk === false) skippedReason = 'canvasNotVerified'
+        else if (entry?.resumeVerified === false || (entry?.resumeVerified == null && entry?.canvasOk === false)) skippedReason = 'resumeNotVerified'
         else skippedReason = 'outsideBudget'
       }
       return {

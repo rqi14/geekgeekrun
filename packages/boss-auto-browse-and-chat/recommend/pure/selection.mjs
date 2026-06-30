@@ -31,3 +31,50 @@ export function selectForGreet (scored, { minScore = 0, greetBudget = 0 } = {}) 
     .sort((a, b) => (b.score - a.score) || (activityRank(b.candidate?.activeText) - activityRank(a.candidate?.activeText)))
     .slice(0, greetBudget)
 }
+
+export const RECOMMEND_JOB_DROPDOWN_SELECTORS = [
+  '#headerWrap .ui-dropmenu-label',
+  '.dropmenu-label.chat-select-job',
+  '.chat-top-job .ui-dropmenu-label',
+  '.chat-top-job .dropmenu-label',
+  '.ui-dropmenu-label.chat-select-job'
+]
+
+export const RECOMMEND_JOB_ITEM_SELECTORS = [
+  '#headerWrap ul.job-list li.job-item',
+  '.chat-top-job .ui-dropmenu-list li',
+  'ul.job-list li.job-item',
+  '.ui-dropmenu-list li[value]'
+]
+
+export function getJobItemValue (attrs = {}) {
+  return String(attrs.value || attrs.dataJobId || attrs.dataId || '').trim()
+}
+
+export function joinSelectors (selectors) {
+  return selectors.join(', ')
+}
+
+/**
+ * Canvas identity match is strongest. In rule-only mode, a confirmed modal
+ * identity plus non-empty summary is allowed as fallback so a missing Canvas
+ * hook does not make every candidate ungreetable.
+ */
+export function evaluateResumeEvidence (input = {}) {
+  if (input.canvasOk === true) {
+    return { verified: true, source: 'canvas', reason: '' }
+  }
+
+  const summary = String(input.summary ?? '').trim()
+  const canUseSummaryFallback =
+    input.requireCanvasVerified !== true &&
+    input.scoringMode === 'rule-only' &&
+    input.identityOk !== false &&
+    summary.length > 0
+
+  if (canUseSummaryFallback) {
+    return { verified: true, source: 'summaryFallback', reason: 'canvasEmptySummaryFallback' }
+  }
+
+  return { verified: false, source: 'none', reason: 'canvasNotVerified' }
+}

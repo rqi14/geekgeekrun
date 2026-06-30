@@ -10,7 +10,7 @@ import { rejectFromList, scrollGently, scrollCardIntoView, greetFromCard } from 
 import { shouldClickX } from './pure/x-guard.mjs'
 import { checkpointRiskControl } from '../risk-detector.mjs'
 import { readQuota } from './quota-reader.mjs'
-import { rankForOpen, selectForGreet } from './pure/selection.mjs'
+import { rankForOpen, selectForGreet, evaluateResumeEvidence } from './pure/selection.mjs'
 import { createRetryingPool } from './pure/concurrency.mjs'
 import { planNativeFilter } from './pure/native-filter.mjs'
 import { applyNativeFilter } from './native-filter-driver.mjs'
@@ -299,9 +299,18 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
     // 身份校验快照：canvas 全文须含候选人姓名或其某个学校，否则视为未确认（可能抓空/串号）
     const idNeedles = [c.geekName, ...(Array.isArray(c.schools) ? c.schools : [])].filter(Boolean)
     const canvasOk = !!fullText && idNeedles.some((n) => fullText.includes(n))
+    const resumeEvidence = evaluateResumeEvidence({
+      canvasOk,
+      summary: summaryObj.summary,
+      identityOk,
+      scoringMode,
+      requireCanvasVerified: cfg.requireCanvasVerified === true
+    })
     debugEvent('resume.identity.canvasCheck', {
       candidate: candidateDebugLabel(c),
       canvasOk,
+      resumeVerified: resumeEvidence.verified,
+      resumeEvidence: resumeEvidence.source,
       checkedNeedles: idNeedles.length,
       resumeChars: (fullText || '').length,
       summaryChars: (summaryObj.summary || '').length
@@ -319,10 +328,16 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
           candidate: c,
           score: s.score,
           hardReject: s.hardReject,
-          reason: canvasOk ? s.reason : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
+          reason: resumeEvidence.verified
+            ? (resumeEvidence.source === 'summaryFallback'
+                ? ((s.reason || '') + ' [canvas为空→按经历概览兜底]')
+                : s.reason)
+            : ((s.reason || '') + ' [canvas未确认→不打招呼]'),
           resumeChars: (fullText || '').length,
           summaryChars: (summaryObj.summary || '').length,
           canvasOk,
+          resumeVerified: resumeEvidence.verified,
+          resumeEvidence: resumeEvidence.source,
           llmError: s.llmError === true
         }
         debugEvent('score.result', summarizeScoreResult(result))
@@ -388,7 +403,7 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
   }
 
   // ---------- C 相：选最好 + 打招呼（烧沟通额度） ----------
-  const greetable = scored.filter((s) => s.canvasOk !== false)
+  const greetable = scored.filter((s) => s.resumeVerified === true)
   const greetSet = selectForGreet(greetable, {
     minScore: cfg.minScoreToChat,
     greetBudget: cfg.dryRun ? greetable.length : budgets.greet
@@ -418,6 +433,8 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
         hasViewed: !!s.candidate._hasViewed,
         schoolRank: s.candidate._schoolRank ?? 0,
         canvasOk: s.canvasOk,
+        resumeVerified: s.resumeVerified === true,
+        resumeEvidence: s.resumeEvidence || 'none',
         llmError: s.llmError === true
       })),
       wouldGreet: greetSet.map((g) => ({ geekName: g.candidate.geekName, score: g.score })),

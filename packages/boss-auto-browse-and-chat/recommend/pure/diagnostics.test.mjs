@@ -50,6 +50,8 @@ test('summarizeScoreResult keeps decision fields compact', () => {
     resumeChars: 1200,
     summaryChars: 90,
     canvasOk: true,
+    resumeVerified: true,
+    resumeEvidence: 'canvas',
     llmError: false
   })
 
@@ -61,6 +63,8 @@ test('summarizeScoreResult keeps decision fields compact', () => {
     resumeChars: 1200,
     summaryChars: 90,
     canvasOk: true,
+    resumeVerified: true,
+    resumeEvidence: 'canvas',
     llmError: false
   })
 })
@@ -77,5 +81,22 @@ test('summarizeGreetSelection marks selected and skipped candidates', () => {
     { rank: 1, candidate: 'A#aaaaaa', score: 90, selected: true, skippedReason: '' },
     { rank: 2, candidate: 'C#cccccc', score: 95, selected: false, skippedReason: 'hardReject' },
     { rank: 3, candidate: 'B#bbbbbb', score: 59, selected: false, skippedReason: 'belowThreshold' }
+  ])
+})
+
+test('summarizeGreetSelection treats summary fallback as verified evidence', () => {
+  const scored = [
+    {
+      candidate: { geekName: 'A', encryptGeekId: 'aaaaaa' },
+      score: 90,
+      hardReject: false,
+      canvasOk: false,
+      resumeVerified: true,
+      resumeEvidence: 'summaryFallback'
+    }
+  ]
+
+  assert.deepEqual(summarizeGreetSelection(scored, [], 60), [
+    { rank: 1, candidate: 'A#aaaaaa', score: 90, selected: false, skippedReason: 'outsideBudget' }
   ])
 })
