@@ -78,3 +78,8 @@ export function evaluateResumeEvidence (input = {}) {
 
   return { verified: false, source: 'none', reason: 'canvasNotVerified' }
 }
+
+export function classifyGreetConfirmation ({ quotaBlocked = false, knowDialogHandled = false } = {}) {
+  if (quotaBlocked) return 'quota-blocked'
+  return knowDialogHandled ? 'confirmed' : 'not-confirmed'
+}

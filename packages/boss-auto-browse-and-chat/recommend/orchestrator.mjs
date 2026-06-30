@@ -460,6 +460,9 @@ export async function runRecommendLoop (page, getFrame, hooks, cfg, llmFn) {
       score: item.score,
       greeted: r.greeted === true,
       quotaBlocked: r.quotaBlocked === true,
+      confirmation: r.confirmation || '',
+      knowDialogHandled: r.knowDialogHandled === true,
+      continueVisible: r.continueVisible === true,
       remainingGreetBudget: budgets.greet
     })
     if (r.quotaBlocked) {

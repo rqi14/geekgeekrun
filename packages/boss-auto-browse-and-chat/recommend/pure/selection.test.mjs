@@ -6,7 +6,8 @@ import {
   RECOMMEND_JOB_DROPDOWN_SELECTORS,
   RECOMMEND_JOB_ITEM_SELECTORS,
   getJobItemValue,
-  evaluateResumeEvidence
+  evaluateResumeEvidence,
+  classifyGreetConfirmation
 } from './selection.mjs'
 
 const pre = (c) => c.s
@@ -103,4 +104,10 @@ test('evaluateResumeEvidence can require canvas explicitly', () => {
     }),
     { verified: false, source: 'none', reason: 'canvasNotVerified' }
   )
+})
+
+test('classifyGreetConfirmation requires an explicit success signal', () => {
+  assert.equal(classifyGreetConfirmation({ quotaBlocked: false, knowDialogHandled: false }), 'not-confirmed')
+  assert.equal(classifyGreetConfirmation({ quotaBlocked: true, knowDialogHandled: true }), 'quota-blocked')
+  assert.equal(classifyGreetConfirmation({ quotaBlocked: false, knowDialogHandled: true }), 'confirmed')
 })
