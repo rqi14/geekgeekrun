@@ -8,6 +8,7 @@ import { readConfigFile, getMergedJobConfig } from './runtime-file-utils.mjs'
 import { setupNetworkInterceptor, parseGeekInfoFromIntercepted } from './resume-extractor.mjs'
 import { createHumanCursor } from './humanMouse.mjs'
 import { dismissBlockingOverlays } from './dialog-dismisser.mjs'
+import { classifyConversationBatch } from './chat-page-batch.mjs'
 import {
   openOnlineResume,
   closeOnlineResumeIfOpen,
@@ -809,16 +810,20 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const conversations = await parseConversationList(page)
       logDebug(`${LOG} DOM 解析到 ${conversations.length} 条会话`)
 
-      const unreadItems = conversations.filter((c) => c.encryptGeekId && !seenIds.has(c.encryptGeekId))
-      if (unreadItems.length === 0) {
+      const batchSize = Math.min(BATCH_REFRESH_SIZE, maxProcessPerRun - totalAttempted)
+      const batchState = classifyConversationBatch(conversations, seenIds, batchSize)
+      if (batchState.unreadExhausted) {
         logInfo(`${LOG} 「未读」列表为空，全部处理完毕`)
         unreadExhausted = true
         break
       }
+      if (batchState.onlySeenVisible) {
+        logInfo(`${LOG} 「未读」列表仍有 ${batchState.visibleCount} 条本轮已处理会话，停止本轮并交给下一轮刷新确认`)
+        break
+      }
 
-      const batchSize = Math.min(BATCH_REFRESH_SIZE, maxProcessPerRun - totalAttempted)
-      const batch = unreadItems.slice(0, batchSize)
-      logInfo(`${LOG} 当前未读 ${unreadItems.length} 条，本批次处理 ${batch.length} 条（已尝试 ${totalAttempted}/${maxProcessPerRun}）`)
+      const batch = batchState.batch
+      logInfo(`${LOG} 当前未读 ${batchState.unseenCount} 条，本批次处理 ${batch.length} 条（已尝试 ${totalAttempted}/${maxProcessPerRun}）`)
 
       await hooks.onProgress?.promise?.({ phase: 'chatPage', current: totalProcessed, max: maxProcessPerRun }).catch(() => {})
 
