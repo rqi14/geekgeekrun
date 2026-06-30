@@ -331,13 +331,15 @@ const runAutoBrowseAndChat = async () => {
         const errMsg = err instanceof Error ? err.message : String(err)
         if (/TimeoutError|timeout|waitForSelector|waitForFunction/i.test(errMsg)) {
           log('检测到超时类错误，可能是 BOSS 安全验证导致。若浏览器窗口有验证提示，请手动完成，程序将在下一轮自动重启。')
-          try {
-            const { Notification } = await import('electron')
-            new Notification({
-              title: 'GeekGeekRun - 可能需要人工验证',
-              body: 'BOSS 直聘可能弹出了安全验证。请检查浏览器窗口，完成验证后程序将在下一轮自动重启继续。'
-            }).show()
-          } catch { /* Notification 不可用时静默忽略 */ }
+          const { showManualVerificationAlert } = (await import(
+            '@geekgeekrun/boss-auto-browse-and-chat/manual-verification-alert.mjs'
+          )) as any
+          await showManualVerificationAlert({
+            key: 'boss-auto-browse-and-chat-timeout',
+            logger: log,
+            body: 'BOSS 直聘可能弹出了安全验证。请检查浏览器窗口，完成验证后程序将在下一轮自动重启继续。',
+            detail: 'BOSS 直聘可能弹出了安全验证。\n\n请检查软件打开的浏览器窗口；如果看到验证提示，请手动完成。程序会在下一轮自动重启继续。'
+          })
         }
       } catch { /* 不影响主流程 */ }
 

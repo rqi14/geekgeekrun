@@ -1,4 +1,5 @@
 import { sleep } from '@geekgeekrun/utils/sleep.mjs'
+import { showManualVerificationAlert } from './manual-verification-alert.mjs'
 
 /**
  * Detect whether the page is currently showing BOSS security verification
@@ -60,15 +61,10 @@ export async function waitForRiskControlCompletion(page, opts = {}) {
 
   logFn('⚠️  检测到 BOSS 安全验证...')
 
-  try {
-    const { Notification } = await import('electron')
-    new Notification({
-      title: 'GeekGeekRun - 需要人工验证',
-      body: '检测到 BOSS 直聘安全验证，请在浏览器窗口中完成验证，完成后程序将自动继续。'
-    }).show()
-  } catch {
-    /* Notification 不可用时静默忽略 */
-  }
+  await showManualVerificationAlert({
+    key: 'boss-auto-browse-risk-control',
+    logger: logFn
+  })
 
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

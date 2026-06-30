@@ -422,6 +422,14 @@ const mainLoop = async () => {
     throw new Error('ACCESS_IS_DENIED')
   }
   if (currentPageUrl.startsWith('https://www.zhipin.com/web/user/safe/verify-slider')) {
+    const { showManualVerificationAlert } = (await import(
+      '@geekgeekrun/boss-auto-browse-and-chat/manual-verification-alert.mjs'
+    )) as any
+    await showManualVerificationAlert({
+      key: 'read-no-reply-safe-verify',
+      logger: (msg: string) => console.log(msg)
+    })
+
     const validateRes: any = await pageMapByName
       .boss!.waitForResponse(
         (response) => {
