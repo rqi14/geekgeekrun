@@ -44,21 +44,6 @@
         </el-checkbox>
       </el-form-item>
     </el-card>
-
-    <el-card class="config-section">
-      <div class="section-title">高级反检测（实验性）</div>
-      <el-form-item>
-        <el-checkbox v-model="model.persistProfile">
-          持久化浏览器 profile（更难被识别为新设备）
-        </el-checkbox>
-        <div class="form-tip">
-          启用后 BOSS 看到的是「老设备」而非「每次都是新设备」，能显著降低人工验证触发率。<br />
-          副作用：bot 运行期间不能在系统 Chrome 同时登录 BOSS（会被挤掉）；profile 文件夹长期会占用
-          1-2GB 磁盘空间。<br />
-          路径：<code>~/.geekgeekrun/storage/boss-chrome-profile/</code>
-        </div>
-      </el-form-item>
-    </el-card>
   </el-form>
 </template>
 

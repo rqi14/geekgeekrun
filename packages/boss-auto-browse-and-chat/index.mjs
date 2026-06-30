@@ -8,8 +8,6 @@ import { readConfigFile, readStorageFile, writeStorageFile, ensureConfigFileExis
 import {
   BOSS_RECOMMEND_PAGE_URL,
   BOSS_CHAT_PAGE_URL,
-  RECOMMEND_JOB_DROPDOWN_LABEL_SELECTOR,
-  RECOMMEND_JOB_ITEM_SELECTOR,
   GOVERNANCE_NOTICE_DIALOG_SELECTOR,
   GOVERNANCE_NOTICE_DIALOG_CONFIRM_BTN_SELECTOR
 } from './constant.mjs'
@@ -23,6 +21,12 @@ import { buildRecruiterLaunchOptions } from './launch-options.mjs'
 import { checkpointRiskControl } from './risk-detector.mjs'
 import { runRecommendLoop } from './recommend/orchestrator.mjs'
 import { buildRecommendCfgAndLlm } from './recommend/run-config.mjs'
+import {
+  RECOMMEND_JOB_DROPDOWN_SELECTORS,
+  RECOMMEND_JOB_ITEM_SELECTORS,
+  getJobItemValue,
+  joinSelectors
+} from './recommend/pure/selection.mjs'
 
 export { default as startBossChatPageProcess } from './chat-page-processor.mjs'
 
@@ -78,9 +82,12 @@ export async function initPuppeteer () {
  * 启发式扫描——这样新冒出的弹窗也能被自动关掉，不必每次手工加 selector。
  * @param {import('puppeteer').Page} page
  */
-export async function dismissGovernanceNoticeDialog (page) {
+export async function dismissGovernanceNoticeDialog (page, options = {}) {
+  const initialWaitMs = Number.isFinite(options.initialWaitMs) ? Math.max(0, options.initialWaitMs) : 10000
   // 给已知的治理公告一点时间冒出来；超时也没关系——通用扫描兜底
-  await page.waitForSelector(GOVERNANCE_NOTICE_DIALOG_SELECTOR, { timeout: 10000 }).catch(() => null)
+  if (initialWaitMs > 0) {
+    await page.waitForSelector(GOVERNANCE_NOTICE_DIALOG_SELECTOR, { timeout: initialWaitMs }).catch(() => null)
+  }
   const closed = await dismissBlockingOverlays(page, { maxRounds: 3 }).catch(() => 0)
   if (closed > 0) {
     logInfo(`[boss-auto-browse] 自动关闭了 ${closed} 个登录后浮层（含治理公告）`)
@@ -185,8 +192,11 @@ async function switchRecommendJobId (page, jobId) {
   try {
     const { createHumanCursor } = await import('./humanMouse.mjs')
     const cursor = await createHumanCursor(page)
+    const dropdownSelector = joinSelectors(RECOMMEND_JOB_DROPDOWN_SELECTORS)
+    const itemSelector = joinSelectors(RECOMMEND_JOB_ITEM_SELECTORS)
+
     // 用拟人轨迹点击下拉触发按钮
-    const dropdownBtn = await page.$(RECOMMEND_JOB_DROPDOWN_LABEL_SELECTOR)
+    const dropdownBtn = await page.$(dropdownSelector)
     if (dropdownBtn) {
       const box = await dropdownBtn.boundingBox().catch(() => null)
       if (box) {
@@ -195,15 +205,19 @@ async function switchRecommendJobId (page, jobId) {
         await dropdownBtn.click()
       }
     } else {
-      await page.click(RECOMMEND_JOB_DROPDOWN_LABEL_SELECTOR)
+      throw new Error(`No element found for selectors: ${dropdownSelector}`)
     }
-    await page.waitForSelector(RECOMMEND_JOB_ITEM_SELECTOR, { timeout: 5000 })
+    await page.waitForSelector(itemSelector, { timeout: 5000 })
     await sleepWithRandomDelay(150, 300)
     // 用拟人轨迹点击目标职位项
-    const items = await page.$$(RECOMMEND_JOB_ITEM_SELECTOR)
+    const items = await page.$$(itemSelector)
     let found = false
     for (const item of items) {
-      const val = await item.evaluate(el => el.getAttribute('value')).catch(() => null)
+      const val = await item.evaluate(el => ({
+        value: el.getAttribute('value'),
+        dataJobId: el.getAttribute('data-job-id'),
+        dataId: el.getAttribute('data-id')
+      })).then(getJobItemValue).catch(() => '')
       if (val === jobId) {
         const itemBox = await item.boundingBox().catch(() => null)
         if (itemBox) {
@@ -268,6 +282,10 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     const bossCookies = readStorageFile('boss-cookies.json')
     const bossLocalStorage = readStorageFile('boss-local-storage.json')
 
+    // Canvas hook must be installed before navigating to the recommend page so
+    // evaluateOnNewDocument runs inside recommendFrame and nested resume frames.
+    const canvasHook = await setupCanvasTextHook(page)
+
     // -----------------------------------------------------------------------
     // 直接导航到推荐牛人页（注入 Cookie / localStorage 后 goto；复用浏览器时若已在推荐页可跳过 goto）
     // -----------------------------------------------------------------------
@@ -281,6 +299,8 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     const alreadyOnRecommend = page.url().startsWith(BOSS_RECOMMEND_PAGE_URL)
     if (!alreadyOnRecommend) {
       await page.goto(BOSS_RECOMMEND_PAGE_URL, { timeout: 60 * 1000 })
+    } else {
+      await page.reload({ timeout: 60 * 1000 }).catch(() => {})
     }
     await page.waitForFunction(
       () => document.readyState === 'complete',
@@ -389,10 +409,9 @@ export default async function startBossAutoBrowse (hooksFromCaller, opts = {}) {
     logInfo('[boss-auto-browse] 候选人列表已就绪')
 
     // -----------------------------------------------------------------------
-    // 设置网络拦截器 + Canvas hook（登录成功后立即启动，仅针对推荐牛人 Tab）
+    // 设置网络拦截器（登录成功后立即启动，仅针对推荐牛人 Tab）
     // -----------------------------------------------------------------------
     const { getInterceptedData } = setupNetworkInterceptor(page)
-    const canvasHook = await setupCanvasTextHook(page)
 
     // -----------------------------------------------------------------------
     // 读取配置（若指定 jobId 则使用 per-job 合并配置）

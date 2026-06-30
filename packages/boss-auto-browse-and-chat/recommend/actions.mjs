@@ -5,8 +5,10 @@ import {
   NOT_INTERESTED_REASON_ITEMS_SELECTOR,
   NOT_INTERESTED_REASON_SUBMIT_SELECTOR,
   CARD_GREET_BTN_SELECTOR,
-  GREETING_SENT_KNOW_BTN_SELECTOR
+  GREETING_SENT_KNOW_BTN_SELECTOR,
+  CONTINUE_CHAT_BUTTON_SELECTOR
 } from '../constant.mjs'
+import { classifyGreetConfirmation } from './pure/selection.mjs'
 
 /**
  * 从列表对某候选人点 X 并选原因。等待原因选择、选好后等待回到 LIST。
@@ -116,15 +118,38 @@ export async function greetFromCard (page, frame, cursor, encryptGeekId) {
   })
   await sleep(800)
   if ((await detectState(page, frame)) === STATES.QUOTA_BLOCKED) {
-    return { greeted: false, quotaBlocked: true }
+    return { greeted: false, quotaBlocked: true, confirmation: 'quota-blocked' }
   }
-  const know = await page.$(GREETING_SENT_KNOW_BTN_SELECTOR).catch(() => null)
+
+  let knowDialogHandled = false
+  const know = await page.waitForSelector(GREETING_SENT_KNOW_BTN_SELECTOR, { timeout: 6000 }).catch(() => null)
   if (know) {
     await cursor.click(know).catch(async () => {
       await know.click().catch(() => {})
     })
+    knowDialogHandled = true
+    await sleep(500)
   }
-  return { greeted: true, quotaBlocked: false }
+
+  const continueVisible = await frame.evaluate((id, sel) => {
+    const inner = document.querySelector(`div.card-inner[data-geek="${id}"]`)
+    if (!inner) return false
+    const li = inner.closest('li.card-item')
+    return !!li?.querySelector(sel)
+  }, encryptGeekId, CONTINUE_CHAT_BUTTON_SELECTOR).catch(() => false)
+
+  const confirmation = classifyGreetConfirmation({
+    quotaBlocked: false,
+    knowDialogHandled: knowDialogHandled || continueVisible
+  })
+
+  return {
+    greeted: confirmation === 'confirmed',
+    quotaBlocked: false,
+    confirmation,
+    knowDialogHandled,
+    continueVisible
+  }
 }
 
 // LIVE-SMOKE PENDING: in dev browser, call rejectFromList on one candidate (confirm card disappears,

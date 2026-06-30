@@ -54,3 +54,63 @@ test('major: rejects when no major matches', () => {
   assert.equal(r.result, 'reject')
   assert.equal(r.reason, 'major')
 })
+
+test('customRules: reject on keyword hit unless exception hits', () => {
+  const cfg = {
+    customRules: [{
+      field: 'all',
+      operator: 'containsAny',
+      keywords: ['分子生物', 'PCR'],
+      action: 'reject',
+      except: { field: 'all', operator: 'containsAny', keywords: ['液滴微流控'] }
+    }]
+  }
+
+  const rejected = ruleFilterList({
+    encryptGeekId: 'j',
+    geekName: '癸',
+    majors: ['分子生物学'],
+    skills: 'PCR'
+  }, cfg)
+  assert.equal(rejected.result, 'reject')
+  assert.equal(rejected.reason, 'customRule')
+
+  const kept = ruleFilterList({
+    encryptGeekId: 'k',
+    geekName: '子',
+    majors: ['分子生物学'],
+    skills: 'PCR 液滴微流控'
+  }, cfg)
+  assert.deepEqual(kept, { result: 'pass' })
+})
+
+test('customRules: notContainsAny rejects missing required school tag', () => {
+  const cfg = {
+    customRules: [{
+      field: 'school',
+      operator: 'notContainsAny',
+      keywords: ['985', '211', '双一流'],
+      action: 'reject'
+    }]
+  }
+  const r = ruleFilterList({ encryptGeekId: 'l', geekName: '丑', schools: ['普通学院'], tags: [] }, cfg)
+  assert.equal(r.result, 'reject')
+  assert.equal(r.reason, 'customRule')
+})
+
+test('customRules: school field can fall back to resumeText for chat flow', () => {
+  const cfg = {
+    customRules: [{
+      field: 'school',
+      operator: 'notContainsAny',
+      keywords: ['985', '双一流'],
+      action: 'reject'
+    }]
+  }
+  const r = ruleFilterList({
+    encryptGeekId: 'm',
+    geekName: '寅',
+    resumeText: '教育经历：浙江大学，985，双一流。'
+  }, cfg)
+  assert.deepEqual(r, { result: 'pass' })
+})

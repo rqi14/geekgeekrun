@@ -31,6 +31,77 @@ import {
 } from './constant.mjs'
 
 /**
+ * 关闭在线简历弹窗（若已打开）。切换候选人前必须关闭，否则弹窗会遮挡会话列表，
+ * 使下一个会话点击被拦截、右侧面板停留在上一个人（表现为后续候选人全部「会话切换未生效」被跳过）。
+ *
+ * 判定「是否打开」用 iframe（src 含 c-resume，URL 特征稳定），不用关闭按钮 selector
+ * （BOSS 改版后 .resume-common-dialog .boss-popup__close 可能失配，导致旧逻辑静默跳过关闭）。
+ * 关闭优先按 Esc（不依赖任何 selector，对改版最鲁棒），Esc 无效再回退点关闭按钮，最多 3 轮。
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {{ cursor?: object, clearCapturedText?: (p: import('puppeteer').Page) => Promise<void> }} [options]
+ * @returns {Promise<boolean>} 是否已关闭（本就未打开也返回 true）
+ */
+export async function closeOnlineResumeIfOpen (page, options = {}) {
+  const { cursor } = options
+  const clearCapturedText =
+    typeof options.clearCapturedText === 'function' ? options.clearCapturedText : null
+
+  // 双重检测：iframe src（精确）+ 模态容器可见性（兜底 BOSS 改版后 iframe src 变化或被自动移除但 backdrop 残留）
+  const isOpen = await page.evaluate((iframeSel) => {
+    if (document.querySelector(iframeSel)) return true
+    const dialog = document.querySelector('.resume-common-dialog')
+    if (!dialog) return false
+    const cs = getComputedStyle(dialog)
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0
+  }, CHAT_PAGE_ONLINE_RESUME_IFRAME_SELECTOR).catch(() => false)
+  if (!isOpen) {
+    return true
+  }
+  console.log('[closeOnlineResumeIfOpen] 检测到在线简历弹窗未关闭，尝试关闭...')
+
+  let closed = false
+  for (let attempt = 0; attempt < 3 && !closed; attempt++) {
+    // 优先 Esc：不依赖关闭按钮 selector
+    await page.keyboard.press('Escape').catch(() => {})
+    try {
+      await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_IFRAME_SELECTOR, { hidden: true, timeout: 1500 })
+      closed = true
+      break
+    } catch {
+      // Esc 没生效，回退点关闭按钮
+    }
+    const closeBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
+    if (closeBtn) {
+      const box = await closeBtn.boundingBox().catch(() => null)
+      if (box && cursor) {
+        await cursor.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 }).catch(() => {})
+      } else {
+        await closeBtn.click().catch(() => {})
+      }
+      try {
+        await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_IFRAME_SELECTOR, { hidden: true, timeout: 1500 })
+        closed = true
+      } catch {
+        // 继续下一轮
+      }
+    }
+  }
+
+  if (closed) {
+    console.log('[closeOnlineResumeIfOpen] 在线简历弹窗已关闭')
+    // 关闭期间旧 iframe 可能还会发来残留 postMessage，在点开新简历前清掉
+    if (clearCapturedText) {
+      await clearCapturedText(page).catch(() => {})
+      console.log('[closeOnlineResumeIfOpen] 残留 Canvas 数据已清空')
+    }
+  } else {
+    console.log('[closeOnlineResumeIfOpen] 在线简历弹窗关闭失败（Esc 与关闭按钮均无效）')
+  }
+  return closed
+}
+
+/**
  * 点击"查看在线简历"，等待简历内容区域（#resume）出现。
  * 调用前需已选中某条会话（右侧已为该候选人）。
  * 使用拟人轨迹点击，规避 BOSS 鼠标埋点。
@@ -52,28 +123,7 @@ export async function openOnlineResume (page, options = {}) {
   }
 
   // 若在线简历弹窗已打开，先关闭它（弹窗不会随切换候选人自动关闭）
-  const closeBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR)
-  if (closeBtn) {
-    console.log('[openOnlineResume] 检测到旧简历弹窗，点击关闭按钮...')
-    const closeBox = await closeBtn.boundingBox().catch(() => null)
-    if (closeBox) {
-      await cursor.click({ x: closeBox.x + closeBox.width / 2, y: closeBox.y + closeBox.height / 2 })
-    } else {
-      await closeBtn.click().catch(() => {})
-    }
-    // 等关闭按钮从 DOM 消失（即弹窗完全关闭），比等 iframe 消失更可靠
-    try {
-      await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR, { hidden: true, timeout: 4000 })
-      console.log('[openOnlineResume] 旧简历弹窗已关闭')
-    } catch {
-      console.log('[openOnlineResume] 关闭按钮 4s 内未消失，继续执行')
-    }
-    // 关闭期间旧 iframe 可能还会发来残留 postMessage，在点开新简历前清掉
-    if (clearCapturedText) {
-      await clearCapturedText(page)
-      console.log('[openOnlineResume] 旧弹窗关闭后残留 Canvas 数据已清空')
-    }
-  }
+  await closeOnlineResumeIfOpen(page, { cursor, clearCapturedText: clearCapturedText || undefined })
 
   // 用坐标点击，更可靠
   const box = await btn.boundingBox()

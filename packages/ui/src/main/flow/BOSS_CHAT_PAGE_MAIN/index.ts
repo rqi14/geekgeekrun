@@ -10,6 +10,13 @@ import { checkShouldExit } from '../../utils/worker'
 import initPublicIpc from '../../utils/initPublicIpc'
 import { forwardConsoleLogToDaemon } from '../../utils/forwardConsoleLogToDaemon'
 import { getLastUsedAndAvailableBrowser } from '../DOWNLOAD_DEPENDENCIES/utils/browser-history'
+import { refreshChatPageForNextRound } from './reusable-page'
+import {
+  combineChatPageRoundResults,
+  skippedChatPageProcessResult,
+  type ChatPageProcessResult
+} from './round-result'
+import { stopChatWorkerAfterRoundIfNeeded } from './round-completion'
 import path from 'path'
 const { default: SqlitePlugin } = SqlitePluginModule
 
@@ -143,9 +150,9 @@ const runChatPage = async () => {
       jobId?: string | null;
       retryCandidate?: { encryptGeekId: string; geekName: string; jobTitle: string } | null;
       processContext?: { currentCandidate: any } | null;
-    }) => Promise<void>
+    }) => Promise<ChatPageProcessResult>
     initPuppeteer: () => Promise<{ puppeteer: any }>
-    dismissGovernanceNoticeDialog: (page: any) => Promise<void>
+    dismissGovernanceNoticeDialog: (page: any, options?: { initialWaitMs?: number }) => Promise<void>
   }
   const {
     startBossChatPageProcess,
@@ -209,6 +216,13 @@ const runChatPage = async () => {
   let peekCapturedText: any = null
   // processContext 提升到循环外，catch 块中可读取被中断的候选人
   const processContext: { currentCandidate: any } = { currentCandidate: null }
+  const clearReusableBrowserState = () => {
+    browser = null
+    page = null
+    getCapturedText = null
+    clearCapturedText = null
+    peekCapturedText = null
+  }
 
   while (true) {
     try {
@@ -224,6 +238,11 @@ const runChatPage = async () => {
       }
       const runOnceAfterComplete = cfg?.chatPage?.runOnceAfterComplete === true
       const keepBrowserOpenAfterRun = cfg?.chatPage?.keepBrowserOpenAfterRun === true
+
+      if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) {
+        log('Reusable browser was closed, launching a fresh browser for this round')
+        clearReusableBrowserState()
+      }
 
       // 仅在没有复用浏览器时才重新启动
       if (!browser) {
@@ -273,7 +292,11 @@ const runChatPage = async () => {
           }
         })
       } else {
-        log('复用已有浏览器实例，直接开始处理...')
+        log('Reusing existing browser, refreshing chat page before this round...')
+        const refreshAction = await refreshChatPageForNextRound(page, BOSS_CHAT_PAGE_URL)
+        log(`Chat page prepared with ${refreshAction}`)
+        await new Promise(r => setTimeout(r, 300))
+        await dismissGovernanceNoticeDialog(page, { initialWaitMs: 250 })
       }
 
       log('读取职位队列配置...')
@@ -282,6 +305,7 @@ const runChatPage = async () => {
       ) as any
       const jobsConfig = readBossJobsConfig()
       const allJobs = jobsConfig?.jobs || []
+      const roundResults: ChatPageProcessResult[] = []
 
       if (allJobs.length > 0) {
         const chatJobs = allJobs.filter(
@@ -294,38 +318,38 @@ const runChatPage = async () => {
             const jname = job.jobName ?? job.name
             log(`开始处理职位 ${jid}（${jname}）的沟通页...`)
             processContext.currentCandidate = null
-            await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, jobId: jid, processContext })
+            const result = await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, jobId: jid, processContext })
+            roundResults.push(result)
             log(`职位 ${jid} 沟通页处理完成`)
           }
         } else {
           log('当前没有勾选"纳入处理"的职位，跳过本轮沟通页扫描')
+          roundResults.push(skippedChatPageProcessResult())
         }
       } else {
         log('未配置职位队列，开始执行 startBossChatPageProcess（处理所有未读）...')
         processContext.currentCandidate = null
-        await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, processContext })
+        const result = await startBossChatPageProcess(hooks, { browser, page, getCapturedText, clearCapturedText, peekCapturedText, processContext })
+        roundResults.push(result)
       }
       log('startBossChatPageProcess 完成')
 
-      if (runOnceAfterComplete) {
-        if (keepBrowserOpenAfterRun) {
-          log('运行已结束，浏览器保持打开，请手动关闭浏览器窗口后将自动退出')
-          await new Promise<void>((resolve) => {
-            browser!.once('disconnected', () => resolve())
-          })
-        } else {
-          try { await browser.close() } catch (e) { void e }
-        }
-        log('已配置 runOnceAfterComplete，本次运行后停止')
-        process.exit(0)
-      }
+      const round = combineChatPageRoundResults(roundResults)
+      log(`沟通页本轮汇总：处理 ${round.totalProcessed} 条，尝试 ${round.totalAttempted} 条，unreadExhausted=${round.unreadExhausted}，reachedMax=${round.reachedMaxProcessPerRun}`)
 
-      try { await browser.close() } catch (e) { void e }
-      browser = null
-      page = null
-      getCapturedText = null
-      clearCapturedText = null
-      peekCapturedText = null
+      const stopped = await stopChatWorkerAfterRoundIfNeeded({
+        runOnceAfterComplete,
+        round,
+        keepBrowserOpenAfterRun,
+        browser,
+        log,
+        exit: (code) => {
+          app.exit(code)
+          process.exit(code)
+        }
+      })
+      if (stopped) return
+
       const rerunMs = cfg?.chatPage?.rerunIntervalMs ?? rerunInterval
       log(`下次运行将在 ${rerunMs}ms 后开始`)
       await sleep(rerunMs)
@@ -373,11 +397,7 @@ const runChatPage = async () => {
       // ── 正常错误处理：关闭浏览器、识别错误类型 ──
       if (browser) {
         try { await browser.close() } catch (e) { void e }
-        browser = null
-        page = null
-        getCapturedText = null
-        clearCapturedText = null
-        peekCapturedText = null
+        clearReusableBrowserState()
       }
       if (err instanceof Error) {
         if (err.message.includes('LOGIN_STATUS_INVALID')) {

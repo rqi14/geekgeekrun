@@ -129,6 +129,11 @@ import BossPart from './LeftNavBar/BossPart.vue'
 import RecruiterPart from './LeftNavBar/RecruiterPart.vue'
 import GlobalConfigPart from './LeftNavBar/GlabalConfigPart.vue'
 import RunDataRecordPart from './LeftNavBar/RunDataRecordPart.vue'
+import {
+  nextDevToolsState,
+  persistDevToolsState,
+  shouldAutoOpenDevToolsOnStartup
+} from './devtools-state'
 
 const router = useRouter()
 const route = useRoute()
@@ -227,13 +232,11 @@ function toggleLogPanel() {
   localStorage.setItem(LOG_PANEL_STORAGE_KEY, String(logPanelOpen.value))
 }
 
-const DEVTOOLS_STORAGE_KEY = 'geekgeekrun_devtools_open'
 const devToolsOpen = ref(false)
 
 function handleToggleDevTools() {
   electron.ipcRenderer.send('toggle-devtools')
-  devToolsOpen.value = !devToolsOpen.value
-  localStorage.setItem(DEVTOOLS_STORAGE_KEY, String(devToolsOpen.value))
+  devToolsOpen.value = nextDevToolsState(devToolsOpen.value)
 }
 
 // 招聘端日志级别（推荐页 / 沟通页 / Webhook 等共用，存于 boss-recruiter.json）
@@ -257,10 +260,15 @@ watch(
   },
   { immediate: true }
 )
-onMounted(() => {
+onMounted(async () => {
   if (identityMode.value === 'recruiter') loadRecruiterLogLevel()
-  if (localStorage.getItem(DEVTOOLS_STORAGE_KEY) === 'true') {
-    devToolsOpen.value = true
+  const shouldRestoreDevTools = shouldAutoOpenDevToolsOnStartup()
+  electron.ipcRenderer.on('devtools-state-changed', (_, payload: { open?: boolean } = {}) => {
+    devToolsOpen.value = persistDevToolsState(payload.open === true)
+  })
+  const isDevToolsOpen = await electron.ipcRenderer.invoke('watch-devtools-state')
+  devToolsOpen.value = persistDevToolsState(isDevToolsOpen === true)
+  if (shouldRestoreDevTools && !devToolsOpen.value) {
     electron.ipcRenderer.send('toggle-devtools')
   }
 })

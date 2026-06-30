@@ -65,6 +65,17 @@ class Analytics {
       engagement_time_msec?: number
     } = {}
   ) {
+    // 未配置 GA（MEASUREMENT_ID / API_SECRET 仍是占位符）时直接跳过，避免无意义的上报与
+    // "api_secret cannot be undefined" 日志刷屏。
+    if (
+      !MEASUREMENT_ID ||
+      !API_SECRET ||
+      MEASUREMENT_ID.startsWith('<') ||
+      API_SECRET.startsWith('<')
+    ) {
+      return
+    }
+
     // Configure session id and engagement time if not present, for more details see:
     // https://developers.google.com/analytics/devguides/collection/protocol/ga4/sending-events?client_type=gtag#recommended_parameters_for_reports
     if (!params.session_id) params.session_id = await this.getOrCreateSessionId()

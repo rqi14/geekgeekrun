@@ -1,6 +1,5 @@
 import { app, dialog } from 'electron'
 import { AsyncSeriesHook, AsyncSeriesWaterfallHook } from 'tapable'
-import { sleep } from '@geekgeekrun/utils/sleep.mjs'
 import { AUTO_CHAT_ERROR_EXIT_CODE } from '../../../common/enums/auto-start-chat'
 import attachListenerForKillSelfOnParentExited from '../../utils/attachListenerForKillSelfOnParentExited'
 import minimist from 'minimist'
@@ -11,17 +10,13 @@ import initPublicIpc from '../../utils/initPublicIpc'
 import { forwardConsoleLogToDaemon } from '../../utils/forwardConsoleLogToDaemon'
 import { getLastUsedAndAvailableBrowser } from '../DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import path from 'path'
+import { buildRecommendWorkerRunMode } from './run-mode'
 const { default: SqlitePlugin } = SqlitePluginModule
 
 process.on('SIGTERM', () => {
   console.log('收到SIGTERM信号，正在退出')
   process.exit(0)
 })
-
-const defaultRerunInterval = (() => {
-  const v = Number(process.env.MAIN_BOSSGEEKGO_RERUN_INTERVAL)
-  return Number.isNaN(v) ? 3000 : v
-})()
 
 const initPlugins = async (hooks) => {
   const { storageFilePath } = await import(
@@ -169,101 +164,78 @@ const runRecommend = async () => {
     })
   })
 
-  while (true) {
-    try {
-      const { readConfigFile } = await import(
+  try {
+    const { readConfigFile } = await import(
+      '@geekgeekrun/boss-auto-browse-and-chat/runtime-file-utils.mjs'
+    )
+    const cfg = readConfigFile('boss-recruiter.json') as {
+      recommendPage?: {
+        keepBrowserOpenAfterRun?: boolean
+      }
+    }
+    const { keepBrowserOpenAfterRun, returnBrowser } = buildRecommendWorkerRunMode(cfg)
+
+    if (jobId) {
+      const { getMergedJobConfig } = await import(
         '@geekgeekrun/boss-auto-browse-and-chat/runtime-file-utils.mjs'
       )
-      const cfg = readConfigFile('boss-recruiter.json') as {
-        recommendPage?: {
-          runOnceAfterComplete?: boolean
-          rerunIntervalMs?: number
-          keepBrowserOpenAfterRun?: boolean
-        }
-      }
-      const runOnceAfterComplete = cfg?.recommendPage?.runOnceAfterComplete === true
-      // 仅招聘端推荐页：运行结束后是否保持浏览器打开（与应聘端无关）
-      const keepBrowserOpenAfterRun = cfg?.recommendPage?.keepBrowserOpenAfterRun === true
-      const returnBrowser = runOnceAfterComplete && keepBrowserOpenAfterRun
+      const mergedCfg = getMergedJobConfig(jobId)
+      log(`使用 job-id=${jobId} 的合并配置`)
+      Object.assign(cfg, mergedCfg)
+    }
 
-      if (jobId) {
-        const { getMergedJobConfig } = await import(
-          '@geekgeekrun/boss-auto-browse-and-chat/runtime-file-utils.mjs'
-        )
-        const mergedCfg = getMergedJobConfig(jobId)
-        log(`使用 job-id=${jobId} 的合并配置`)
-        Object.assign(cfg, mergedCfg)
-      }
-
-      log('开始执行 startBossAutoBrowse（推荐页）...')
-      const result = await startBossAutoBrowse(hooks, { returnBrowser, jobId: jobId ?? undefined } as any)
-      if (result?.browser) {
-        if (keepBrowserOpenAfterRun) {
-          log('运行已结束，浏览器保持打开，请手动关闭浏览器窗口后将自动退出')
-          await new Promise<void>((resolve) => {
-            result!.browser!.once('disconnected', () => resolve())
-          })
-          process.exit(0)
-        }
-        try {
-          await result.browser.close()
-        } catch (e) {
-          void e
-        }
-      }
-      log('startBossAutoBrowse 完成，等待下次运行...')
-      if (runOnceAfterComplete) {
-        log('已配置 runOnceAfterComplete，本次运行后停止')
+    log('开始执行 startBossAutoBrowse（推荐页）...')
+    const result = await startBossAutoBrowse(hooks, { returnBrowser, jobId: jobId ?? undefined } as any)
+    if (result && typeof result === 'object' && 'browser' in result && result.browser) {
+      const browser = result.browser
+      if (keepBrowserOpenAfterRun) {
+        log('运行已结束，浏览器保持打开，请手动关闭浏览器窗口后将自动退出')
+        await new Promise<void>((resolve) => {
+          browser.once('disconnected', () => resolve())
+        })
         process.exit(0)
       }
-      const rerunMs = cfg?.recommendPage?.rerunIntervalMs ?? defaultRerunInterval
-      log(`下次运行将在 ${rerunMs}ms 后开始`)
-      await sleep(rerunMs)
-    } catch (err) {
-      if (err instanceof Error) {
-        if (err.message.includes('LOGIN_STATUS_INVALID')) {
-          await dialog.showMessageBox({
-            type: `error`,
-            message: `登录状态无效`,
-            detail: `请重新登录BOSS直聘（招聘端）`
-          })
-          process.exit(AUTO_CHAT_ERROR_EXIT_CODE.LOGIN_STATUS_INVALID)
-          break
-        }
-        if (err.message.includes('ERR_INTERNET_DISCONNECTED')) {
-          process.exit(AUTO_CHAT_ERROR_EXIT_CODE.ERR_INTERNET_DISCONNECTED)
-          break
-        }
-        if (err.message.includes('ACCESS_IS_DENIED')) {
-          process.exit(AUTO_CHAT_ERROR_EXIT_CODE.ACCESS_IS_DENIED)
-          break
-        }
-        if (
-          err.message.includes(`Could not find Chrome`) ||
-          err.message.includes(`no executable was found`)
-        ) {
-          process.exit(AUTO_CHAT_ERROR_EXIT_CODE.PUPPETEER_IS_NOT_EXECUTABLE)
-          break
-        }
+      try {
+        await browser.close()
+      } catch (e) {
+        void e
       }
-      console.error('[Boss Recommend Main] error:', err instanceof Error ? `${err.name}: ${err.message}\n${err.stack}` : JSON.stringify(err))
-      const shouldExit = await checkShouldExit()
-      if (shouldExit) {
-        app.exit()
-        return
-      }
-      const { readConfigFile: readCfg } = await import(
-        '@geekgeekrun/boss-auto-browse-and-chat/runtime-file-utils.mjs'
-      )
-      const errCfg = readCfg('boss-recruiter.json') as {
-        recommendPage?: { rerunIntervalMs?: number }
-      }
-      const errRerunMs = errCfg?.recommendPage?.rerunIntervalMs ?? defaultRerunInterval
-      console.log(
-        `[Boss Recommend Main] An internal error is caught, and browser will be restarted in ${errRerunMs}ms.`
-      )
-      await sleep(errRerunMs)
     }
+    log('startBossAutoBrowse 完成，推荐牛人单次运行结束')
+    process.exit(0)
+  } catch (err) {
+    if (err instanceof Error) {
+      if (err.message.includes('LOGIN_STATUS_INVALID')) {
+        await dialog.showMessageBox({
+          type: `error`,
+          message: `登录状态无效`,
+          detail: `请重新登录BOSS直聘（招聘端）`
+        })
+        process.exit(AUTO_CHAT_ERROR_EXIT_CODE.LOGIN_STATUS_INVALID)
+      }
+      if (err.message.includes('ERR_INTERNET_DISCONNECTED')) {
+        process.exit(AUTO_CHAT_ERROR_EXIT_CODE.ERR_INTERNET_DISCONNECTED)
+      }
+      if (err.message.includes('ACCESS_IS_DENIED')) {
+        process.exit(AUTO_CHAT_ERROR_EXIT_CODE.ACCESS_IS_DENIED)
+      }
+      if (
+        err.message.includes(`Could not find Chrome`) ||
+        err.message.includes(`no executable was found`)
+      ) {
+        process.exit(AUTO_CHAT_ERROR_EXIT_CODE.PUPPETEER_IS_NOT_EXECUTABLE)
+      }
+    }
+    console.error('[Boss Recommend Main] error:', err instanceof Error ? `${err.name}: ${err.message}\n${err.stack}` : JSON.stringify(err))
+    const shouldExit = await checkShouldExit()
+    if (shouldExit) {
+      app.exit()
+      return
+    }
+    console.log(
+      '[Boss Recommend Main] An internal error is caught; recommend worker is single-run and will exit.'
+    )
+    process.exit(1)
   }
 }
 

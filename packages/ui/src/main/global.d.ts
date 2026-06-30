@@ -53,5 +53,5 @@ declare module '@geekgeekrun/boss-auto-browse-and-chat/index.mjs' {
   export const bossAutoBrowseEventBus: EventEmitter
   export function initPuppeteer(): Promise<any>
   export default function startBossAutoBrowse(hooks: any, opts?: { returnBrowser?: boolean }): Promise<void | { browser: any; page: any }>
-  export function startBossChatPageProcess(hooks: any, options?: { browser?: any; page?: any }): Promise<void>
+  export function startBossChatPageProcess(hooks: any, options?: { browser?: any; page?: any }): Promise<any>
 }

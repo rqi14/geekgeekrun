@@ -110,7 +110,7 @@ const attachRequestsListener = async (target: Target) => {
   if (page.url().match(/^https:\/\/www.zhipin.com\/job_detail\/(.+)\.html/)) {
     const encryptJobId = page.url().match(/^https:\/\/www.zhipin.com\/job_detail\/(.+)\.html/)?.[1]
     if (encryptJobId) {
-      handleJobDetailPage({ encryptJobId })
+      handleJobDetailPage({ encryptJobId }).catch(() => {})
     }
   }
 
@@ -164,7 +164,7 @@ const attachRequestsListener = async (target: Target) => {
         .url()
         .match(/^https:\/\/www.zhipin.com\/job_detail\/(.+)\.html/)?.[1]
       if (encryptJobId) {
-        handleJobDetailPage({ encryptJobId })
+        handleJobDetailPage({ encryptJobId }).catch(() => {})
       }
     } else if (response.url().startsWith('https://www.zhipin.com/wapi/zpgeek/job/detail.json')) {
       const data = await response.json()
@@ -413,7 +413,7 @@ export async function launchBossSite() {
   //#endregion
   gtag('launch_boss_site_ready')
   browser.on('targetcreated', (target) => {
-    attachRequestsListener(target)
+    attachRequestsListener(target).catch(() => {})
   })
   browser.on('targetdestroyed', async () => {
     const pages = await browser.pages()

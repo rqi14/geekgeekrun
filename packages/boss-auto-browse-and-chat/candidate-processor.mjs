@@ -12,6 +12,7 @@ import {
 import { sleep } from '@geekgeekrun/utils/sleep.mjs'
 import { createHumanCursor } from './humanMouse.mjs'
 import { debug as logDebug, info as logInfo, warn as logWarn } from './logger.mjs'
+import { evaluateCustomRules } from './custom-rules.mjs'
 
 /**
  * 从工作经验描述中解析年数（取区间最大值或单值）
@@ -193,7 +194,7 @@ function safeRegExp (pattern, flags) {
   }
 }
 
-/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'school'|'major'|'blockName'|'viewed'} FilterResultReason */
+/** @typedef {'city'|'education'|'workExp'|'salary'|'skills'|'school'|'major'|'blockName'|'viewed'|'customRule'} FilterResultReason */
 
 /**
  * 按 candidate-filter 配置筛选候选人
@@ -209,6 +210,7 @@ function safeRegExp (pattern, flags) {
  *   expectSchoolKeywords?: string[],
  *   expectMajorKeywords?: string[],
  *   blockCandidateNameRegExpStr?: string,
+ *   customRules?: Array<object>,
  *   skipViewedCandidates?: boolean
  * }} filterConfig
  * expectSalaryWhenNegotiable: 候选人薪资为"面议"或无法解析时：'exclude'=不通过，'include'=通过
@@ -228,6 +230,7 @@ export function filterCandidates (candidates, filterConfig) {
     expectSchoolKeywords = [],
     expectMajorKeywords = [],
     blockCandidateNameRegExpStr = '',
+    customRules = [],
     skipViewedCandidates = false
   } = filterConfig || {}
 
@@ -391,6 +394,19 @@ export function filterCandidates (candidates, filterConfig) {
         })
         continue
       }
+    }
+
+    const customRuleResult = evaluateCustomRules(candidate, customRules)
+    if (customRuleResult.matched) {
+      skipped.push({
+        candidate,
+        filterResult: {
+          matched: false,
+          reason: customRuleResult.reason,
+          reasonDetail: customRuleResult.reasonDetail
+        }
+      })
+      continue
     }
 
     matched.push({

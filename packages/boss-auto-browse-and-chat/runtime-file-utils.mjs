@@ -18,6 +18,86 @@ const defaultConfigFileContentMap = {
   'candidate-filter.json': JSON.stringify(defaultCandidateFilterConf)
 }
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
+
+function listFromMaybe (value) {
+  if (Array.isArray(value)) return value.map(v => String(v ?? '').trim()).filter(Boolean)
+  if (typeof value === 'string') return value.split(/[,，\n]/).map(v => v.trim()).filter(Boolean)
+  return []
+}
+
+function legacyHardFilterRulesFrom (f, pf) {
+  const fieldRules = pf.fieldRules ?? f.fieldRules ?? {}
+  const exclude = listFromMaybe(fieldRules.exclude)
+  const include = listFromMaybe(fieldRules.include)
+  const skills = listFromMaybe(pf.expectSkillKeywords ?? f.expectSkillKeywords)
+  const schools = listFromMaybe(pf.expectSchoolKeywords ?? f.expectSchoolKeywords)
+  const majors = listFromMaybe(pf.expectMajorKeywords ?? f.expectMajorKeywords)
+  const namePattern = String(pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '').trim()
+  const rules = []
+
+  if (exclude.length) {
+    const rule = {
+      enabled: true,
+      field: 'all',
+      operator: 'containsAny',
+      keywords: exclude,
+      pattern: '',
+      action: 'reject',
+      label: '命中不对口关键词'
+    }
+    if (include.length) {
+      rule.except = { field: 'all', operator: 'containsAny', keywords: include, pattern: '' }
+    }
+    rules.push(rule)
+  }
+  if (skills.length) {
+    rules.push({
+      enabled: true,
+      field: 'skills',
+      operator: 'notContainsAny',
+      keywords: skills,
+      pattern: '',
+      action: 'reject',
+      label: '技能/优势必须命中'
+    })
+  }
+  if (schools.length) {
+    rules.push({
+      enabled: true,
+      field: 'school',
+      operator: 'notContainsAny',
+      keywords: schools,
+      pattern: '',
+      action: 'reject',
+      label: '院校/标签必须命中'
+    })
+  }
+  if (majors.length) {
+    rules.push({
+      enabled: true,
+      field: 'major',
+      operator: 'notContainsAny',
+      keywords: majors,
+      pattern: '',
+      action: 'reject',
+      label: '专业必须命中'
+    })
+  }
+  if (namePattern) {
+    rules.push({
+      enabled: true,
+      field: 'name',
+      operator: 'regex',
+      keywords: [],
+      pattern: namePattern,
+      action: 'reject',
+      label: '姓名命中屏蔽正则'
+    })
+  }
+  return rules
+}
+
 const runtimeFolderPath = path.join(os.homedir(), '.geekgeekrun')
 export const configFolderPath = path.join(runtimeFolderPath, 'config')
 
@@ -139,6 +219,94 @@ export const writeStorageFile = async (fileName, content, { isJson } = {}) => {
 
 const bossJobsConfigFileName = 'boss-jobs-config.json'
 
+/**
+ * migrateJobFilter(filter) — 纯函数、幂等。把职位 filter 规整成四块结构：
+ *   preFilter（共享卡片初筛）/ rubric（共享 AI 评分标准单一真源）/ recommend（推荐专属）/ chat（沟通专属）。
+ * 同时兼容旧的扁平结构（resumeLlmEnabled / resumeLlmConfig / resumeKeywords / expect* 直接放在 filter 顶层）。
+ * 取值优先级：新块字段 > 旧扁平字段 > 默认值。未知顶层键（如 schoolFloorRank 之外的）一并保留。
+ *
+ * 迁移关键：旧 `resumeLlmEnabled` 单开关同时映射到 recommend.scoringEnabled 与 chat.llmFilterEnabled，
+ * 保持旧"二合一"行为不回归；之后用户可在 UI 分别关闭。
+ */
+export function migrateJobFilter (filter) {
+  const f = filter && typeof filter === 'object' ? filter : {}
+  const pf = f.preFilter && typeof f.preFilter === 'object' ? f.preFilter : {}
+  const rb = f.rubric && typeof f.rubric === 'object' ? f.rubric : {}
+  const rec = f.recommend && typeof f.recommend === 'object' ? f.recommend : {}
+  const ch = f.chat && typeof f.chat === 'object' ? f.chat : {}
+  const oldLlm = f.resumeLlmConfig && typeof f.resumeLlmConfig === 'object' ? f.resumeLlmConfig : {}
+  const oldRubric = oldLlm.rubric && typeof oldLlm.rubric === 'object' ? oldLlm.rubric : {}
+
+  const preFilter = {
+    expectCityEnabled: pf.expectCityEnabled ?? f.expectCityEnabled ?? false,
+    expectCityList: pf.expectCityList ?? f.expectCityList ?? [],
+    expectEducationEnabled: pf.expectEducationEnabled ?? f.expectEducationEnabled ?? false,
+    expectEducationRegExpStr: pf.expectEducationRegExpStr ?? f.expectEducationRegExpStr ?? '',
+    expectWorkExpMinEnabled: pf.expectWorkExpMinEnabled ?? f.expectWorkExpMinEnabled ?? false,
+    expectWorkExpMaxEnabled: pf.expectWorkExpMaxEnabled ?? f.expectWorkExpMaxEnabled ?? false,
+    expectWorkExpRange: pf.expectWorkExpRange ?? f.expectWorkExpRange ?? [0, 99],
+    expectSalaryMinEnabled: pf.expectSalaryMinEnabled ?? f.expectSalaryMinEnabled ?? false,
+    expectSalaryMaxEnabled: pf.expectSalaryMaxEnabled ?? f.expectSalaryMaxEnabled ?? false,
+    expectSalaryRange: pf.expectSalaryRange ?? f.expectSalaryRange ?? [0, 0],
+    expectSalaryWhenNegotiable: pf.expectSalaryWhenNegotiable ?? f.expectSalaryWhenNegotiable ?? 'exclude',
+    expectSkillKeywords: pf.expectSkillKeywords ?? f.expectSkillKeywords ?? [],
+    expectSchoolKeywords: pf.expectSchoolKeywords ?? f.expectSchoolKeywords ?? [],
+    expectMajorKeywords: pf.expectMajorKeywords ?? f.expectMajorKeywords ?? [],
+    blockCandidateNameRegExpStr: pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '',
+    fieldRules: pf.fieldRules ?? f.fieldRules ?? { include: [], exclude: [] },
+    customRules: hasOwn(pf, 'customRules')
+      ? pf.customRules
+      : (hasOwn(f, 'customRules') ? f.customRules : legacyHardFilterRulesFrom(f, pf)),
+    schoolFloorRank: pf.schoolFloorRank ?? f.schoolFloorRank ?? null,
+    nativeFilter: pf.nativeFilter ?? f.nativeFilter ?? null
+  }
+
+  const rubric = {
+    sourceJd: rb.sourceJd ?? oldLlm.sourceJd ?? '',
+    modelId: rb.modelId ?? oldLlm.rubricGenerationModelId ?? null,
+    passThreshold: rb.passThreshold ?? oldLlm.passThreshold ?? oldRubric.passThreshold ?? 75,
+    knockouts: rb.knockouts ?? oldRubric.knockouts ?? [],
+    dimensions: rb.dimensions ?? oldRubric.dimensions ?? [],
+    _scoring_note: rb._scoring_note ?? oldRubric._scoring_note ?? null
+  }
+
+  const recommend = {
+    scoringEnabled: rec.scoringEnabled ?? f.resumeLlmEnabled ?? false,
+    minScoreToChat: rec.minScoreToChat ?? f.minScoreToChat ?? null,
+    onScoreError: rec.onScoreError ?? f.onScoreError ?? 'skip',
+    skipViewedCandidates: rec.skipViewedCandidates ?? f.skipViewedCandidates ?? false
+  }
+
+  const chat = {
+    llmFilterEnabled: ch.llmFilterEnabled ?? f.resumeLlmEnabled ?? false,
+    keywordsEnabled: ch.keywordsEnabled ?? f.resumeKeywordsEnabled ?? false,
+    keywords: ch.keywords ?? f.resumeKeywords ?? [],
+    regexEnabled: ch.regexEnabled ?? f.resumeRegExpEnabled ?? false,
+    regex: ch.regex ?? f.resumeRegExpStr ?? ''
+  }
+
+  // 保留未知顶层键；剥离已迁入块的旧扁平键，避免新旧并存引发歧义
+  const migratedAwayKeys = new Set([
+    'preFilter', 'rubric', 'recommend', 'chat',
+    'resumeLlmEnabled', 'resumeLlmConfig', 'resumeLlmRule', 'resumeKeywordsEnabled', 'resumeKeywords',
+    'resumeRegExpEnabled', 'resumeRegExpStr',
+    'expectCityEnabled', 'expectCityList', 'expectEducationEnabled', 'expectEducationRegExpStr',
+    'expectWorkExpMinEnabled', 'expectWorkExpMaxEnabled', 'expectWorkExpRange',
+    'expectSalaryMinEnabled', 'expectSalaryMaxEnabled', 'expectSalaryRange', 'expectSalaryWhenNegotiable',
+    'expectSkillKeywords', 'expectSchoolKeywords', 'expectMajorKeywords', 'blockCandidateNameRegExpStr',
+    'fieldRules', 'customRules', 'schoolFloorRank', 'nativeFilter',
+    'minScoreToChat', 'onScoreError', 'skipViewedCandidates'
+  ])
+  const preserved = {}
+  for (const k of Object.keys(f)) {
+    if (!migratedAwayKeys.has(k)) {
+      preserved[k] = f[k]
+    }
+  }
+
+  return { ...preserved, preFilter, rubric, recommend, chat }
+}
+
 export const readBossJobsConfig = () => {
   ensureRuntimeFolderPathExist()
   const filePath = path.join(configFolderPath, bossJobsConfigFileName)
@@ -146,6 +314,9 @@ export const readBossJobsConfig = () => {
     return { jobs: [] }
   }
   try {
+    // 返回原始持久化结构（不在此处迁移/写回）。迁移仅在消费侧（getMergedJobConfig /
+    // jobFilterToCandidateFilter / jobFilterToChatPageFilter）内存中进行（migrateJobFilter 幂等且兼容新旧），
+    // 这样旧 UI 仍按原结构 hydrate、不会被自动改写丢数据；新 UI 保存时再写入四块结构。
     return JSON.parse(fs.readFileSync(filePath, 'utf8'))
   } catch {
     return { jobs: [] }
@@ -166,7 +337,9 @@ function jobFilterToCandidateFilter (jobFilter) {
   if (!jobFilter || typeof jobFilter !== 'object') {
     return {}
   }
-  const f = jobFilter
+  // 规整成四块结构后从 preFilter / recommend 取值（兼容旧扁平输入）
+  const m = migrateJobFilter(jobFilter)
+  const f = m.preFilter
   const expectCityList = f.expectCityEnabled && Array.isArray(f.expectCityList)
     ? f.expectCityList
     : []
@@ -198,13 +371,15 @@ function jobFilterToCandidateFilter (jobFilter) {
     expectMajorKeywords: Array.isArray(f.expectMajorKeywords) ? f.expectMajorKeywords : [],
     blockCandidateNameRegExpStr:
       typeof f.blockCandidateNameRegExpStr === 'string' ? f.blockCandidateNameRegExpStr : '',
-    skipViewedCandidates: f.skipViewedCandidates === true,
+    customRules: Array.isArray(f.customRules) ? f.customRules : [],
+    skipViewedCandidates: m.recommend.skipViewedCandidates === true,
     nativeFilter: f.nativeFilter && typeof f.nativeFilter === 'object' ? f.nativeFilter : undefined
   }
 }
 
 // 测试别名（供 recommend/pure/job-filter-passthrough.test.mjs 使用）
 export const __jobFilterToCandidateFilter = jobFilterToCandidateFilter
+export const __jobFilterToChatPageFilter = jobFilterToChatPageFilter
 
 /**
  * 将 boss-jobs-config 的 filter 转换为 chatPage.filter 格式（简历筛选）。
@@ -214,26 +389,24 @@ function jobFilterToChatPageFilter (jobFilter) {
   if (!jobFilter || typeof jobFilter !== 'object') {
     return { mode: 'keywords', keywordList: [], llmRule: '', llmConfig: null }
   }
-  const f = jobFilter
-  // resumeLlmConfig（Rubric 模式）优先
-  if (f.resumeLlmEnabled && f.resumeLlmConfig?.rubric) {
+  const m = migrateJobFilter(jobFilter)
+  const chat = m.chat
+  const rubric = m.rubric
+  const hasRubric = Array.isArray(rubric.dimensions) && rubric.dimensions.length > 0
+
+  // 沟通 LLM 筛选：只看 chat.llmFilterEnabled（与推荐评分独立），并复用共享 rubric
+  if (chat.llmFilterEnabled && hasRubric) {
     return {
       mode: 'llm',
       keywordList: [],
-      llmRule: f.resumeLlmConfig.sourceJd || '',
-      llmConfig: f.resumeLlmConfig
+      llmRule: rubric.sourceJd || '',
+      llmConfig: { rubric, passThreshold: rubric.passThreshold }
     }
   }
-  if (f.resumeLlmEnabled && typeof f.resumeLlmRule === 'string') {
-    return { mode: 'llm', keywordList: [], llmRule: f.resumeLlmRule, llmConfig: null }
+  if (chat.keywordsEnabled && Array.isArray(chat.keywords)) {
+    return { mode: 'keywords', keywordList: chat.keywords, llmRule: '', llmConfig: null }
   }
-  if (f.resumeKeywordsEnabled && Array.isArray(f.resumeKeywords)) {
-    return { mode: 'keywords', keywordList: f.resumeKeywords, llmRule: '', llmConfig: null }
-  }
-  // resumeRegExpEnabled：chat-page 暂无 regex 模式，暂不筛选（全部通过），后续可扩展
-  if (f.resumeRegExpEnabled && typeof f.resumeRegExpStr === 'string' && f.resumeRegExpStr) {
-    return { mode: 'keywords', keywordList: [], llmRule: '', llmConfig: null }
-  }
+  // chat.regexEnabled：沟通页暂无 regex 模式（UI 已标"暂未支持"），不筛选（全部通过）
   return { mode: 'keywords', keywordList: [], llmRule: '', llmConfig: null }
 }
 
@@ -257,26 +430,29 @@ export const getMergedJobConfig = (jobId) => {
     }
   }
 
-  const jobFilter = jobEntry.filter
+  const jobFilter = migrateJobFilter(jobEntry.filter)
   const candidateFilter = jobFilterToCandidateFilter(jobFilter)
-  // fieldRules/schoolFloorRank 暂无 per-job UI：优先职位 filter 自带，否则回退全局 candidate-filter.json
-  candidateFilter.fieldRules = jobFilter?.fieldRules ?? candidateFilterConfig.fieldRules
-  candidateFilter.schoolFloorRank = jobFilter?.schoolFloorRank ?? candidateFilterConfig.schoolFloorRank
+  // fieldRules/schoolFloorRank 现归入 per-job preFilter；优先职位自带，否则回退全局 candidate-filter.json
+  candidateFilter.fieldRules = jobFilter.preFilter?.fieldRules ?? candidateFilterConfig.fieldRules
+  candidateFilter.schoolFloorRank = jobFilter.preFilter?.schoolFloorRank ?? candidateFilterConfig.schoolFloorRank
   const chatPageFilter = jobFilterToChatPageFilter(jobFilter)
 
-  // 统一：职位的 AI Rubric（resumeLlmConfig）同时驱动推荐页精评，不必在推荐页面板再配一遍。
-  // 选了职位且开了 rubric → 用 per-job rubric；否则回退全局 boss-recruiter.json 的 scoring（推荐页面板）。
-  const llm = jobFilter?.resumeLlmConfig
-  const hasJobRubric =
-    jobFilter?.resumeLlmEnabled && Array.isArray(llm?.rubric?.dimensions) && llm.rubric.dimensions.length > 0
-  const scoring = hasJobRubric
+  // 共享 rubric 单一真源（filter.rubric）。推荐评分与沟通筛选各看自己的独立开关，不再相互强制。
+  const rubric = jobFilter.rubric
+  const hasRubric = Array.isArray(rubric?.dimensions) && rubric.dimensions.length > 0
+  // 推荐评分：只看 recommend.scoringEnabled（且 rubric 有维度）；否则回退全局 boss-recruiter.json scoring（未选职位面板）。
+  const scoring = jobFilter.recommend?.scoringEnabled && hasRubric
     ? {
         enabled: true,
-        rubric: { ...llm.rubric, passThreshold: llm.passThreshold },
+        rubric,
         minScoreToChat:
-          typeof llm.passThreshold === 'number' ? llm.passThreshold : (recruiterConfig.scoring?.minScoreToChat ?? 0),
-        onScoreError: recruiterConfig.scoring?.onScoreError ?? 'skip',
-        modelId: llm.rubricGenerationModelId ?? recruiterConfig.scoring?.modelId ?? null
+          typeof jobFilter.recommend.minScoreToChat === 'number'
+            ? jobFilter.recommend.minScoreToChat
+            : (typeof rubric.passThreshold === 'number'
+                ? rubric.passThreshold
+                : (recruiterConfig.scoring?.minScoreToChat ?? 0)),
+        onScoreError: jobFilter.recommend.onScoreError ?? recruiterConfig.scoring?.onScoreError ?? 'skip',
+        modelId: rubric.modelId ?? recruiterConfig.scoring?.modelId ?? null
       }
     : recruiterConfig.scoring
 

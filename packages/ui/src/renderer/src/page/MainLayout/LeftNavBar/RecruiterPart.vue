@@ -10,6 +10,9 @@
       <RouterLink :to="{ name: 'BossLlmConfig' }">
         配置大语言模型
       </RouterLink>
+      <RouterLink :to="{ name: 'BossGlobalSettings' }">
+        全局运行设置
+      </RouterLink>
       <a href="javascript:void(0)" @click="handleLaunchRecruiterBossSite">
         手动逛逛<TopRight w-1em h-1em mr10px />
       </a>

@@ -12,12 +12,9 @@ export const DEFAULTS = {
   scoreMaxAttempts: 3,
   scrollDelayMsRange: [800, 2000],
   delayBetweenActionsMs: [1500, 4000],
-  minScoreToChat: 0,
-  onScoreError: 'skip',
   rerunIntervalMs: 600000
 }
 
-const arr = (v) => (Array.isArray(v) ? v : [])
 const num = (v, d) => (typeof v === 'number' && !Number.isNaN(v) ? v : d)
 const sortedRange = (v, d) => {
   const a = Array.isArray(v) && v.length >= 2 ? [num(v[0], d[0]), num(v[1], d[1])] : [...d]
@@ -26,32 +23,8 @@ const sortedRange = (v, d) => {
 
 export function normalizeRecommendConfig(raw) {
   const r = raw?.['boss-recruiter.json'] || {}
-  const f = raw?.['candidate-filter.json'] || {}
   const rp = r.recommendPage || {}
-  const sc = r.scoring || {}
   return {
-    scoring: {
-      enabled: sc.enabled === true,
-      jd: typeof sc.jd === 'string' ? sc.jd : '',
-      minScoreToChat: num(sc.minScoreToChat, DEFAULTS.minScoreToChat),
-      onScoreError: sc.onScoreError === 'greetIfRulePass' ? 'greetIfRulePass' : 'skip',
-      modelId: sc.modelId ?? null
-    },
-    filter: {
-      expectCityList: arr(f.expectCityList),
-      expectEducationRegExpStr:
-        typeof f.expectEducationRegExpStr === 'string' ? f.expectEducationRegExpStr : '',
-      expectWorkExpRange: sortedRange(f.expectWorkExpRange, [0, 99]),
-      expectSalaryRange: sortedRange(f.expectSalaryRange, [0, 0]),
-      expectSalaryWhenNegotiable:
-        f.expectSalaryWhenNegotiable === 'include' ? 'include' : 'exclude',
-      expectSkillKeywords: arr(f.expectSkillKeywords),
-      expectSchoolKeywords: arr(f.expectSchoolKeywords),
-      expectMajorKeywords: arr(f.expectMajorKeywords),
-      blockCandidateNameRegExpStr:
-        typeof f.blockCandidateNameRegExpStr === 'string' ? f.blockCandidateNameRegExpStr : '',
-      skipViewedCandidates: (rp.skipViewedCandidates ?? f.skipViewedCandidates) === true
-    },
     budget: {
       waveSize: num(rp.waveSize, DEFAULTS.waveSize),
       maxGreetPerRun: num(rp.maxGreetPerRun, DEFAULTS.maxGreetPerRun),
@@ -68,28 +41,16 @@ export function normalizeRecommendConfig(raw) {
       clickNotInterestedForFiltered: rp.clickNotInterestedForFiltered !== false,
       runOnceAfterComplete: rp.runOnceAfterComplete === true,
       rerunIntervalMs: num(rp.rerunIntervalMs, DEFAULTS.rerunIntervalMs),
-      keepBrowserOpenAfterRun: rp.keepBrowserOpenAfterRun === true,
-      persistProfile: r.advanced?.persistProfile === true
+      keepBrowserOpenAfterRun: rp.keepBrowserOpenAfterRun === true
     }
   }
 }
 
 export function toSavePayload(s) {
+  // 推荐牛人页只负责运行预算/节奏。候选人筛选与评分(rubric)均按职位在「职位配置」里设置,
+  // 不再从本页写入全局 candidate-filter.json / scoring。IPC 按 key 合并,省略即保留原值。
   return {
-    // candidate-filter.json（save-boss-recruiter-config 读扁平键）
-    expectCityList: s.filter.expectCityList,
-    expectEducationRegExpStr: s.filter.expectEducationRegExpStr,
-    expectWorkExpRange: s.filter.expectWorkExpRange,
-    expectSalaryRange: s.filter.expectSalaryRange,
-    expectSalaryWhenNegotiable: s.filter.expectSalaryWhenNegotiable,
-    expectSkillKeywords: s.filter.expectSkillKeywords,
-    expectSchoolKeywords: s.filter.expectSchoolKeywords,
-    expectMajorKeywords: s.filter.expectMajorKeywords,
-    blockCandidateNameRegExpStr: s.filter.blockCandidateNameRegExpStr,
-    skipViewedCandidates: s.filter.skipViewedCandidates,
     // boss-recruiter.json
-    scoring: { ...s.scoring },
-    advanced: { persistProfile: s.run.persistProfile },
     recommendPage: {
       waveSize: s.budget.waveSize,
       maxGreetPerRun: s.budget.maxGreetPerRun,
@@ -104,8 +65,7 @@ export function toSavePayload(s) {
       clickNotInterestedForFiltered: s.run.clickNotInterestedForFiltered,
       runOnceAfterComplete: s.run.runOnceAfterComplete,
       rerunIntervalMs: s.run.rerunIntervalMs,
-      keepBrowserOpenAfterRun: s.run.keepBrowserOpenAfterRun,
-      skipViewedCandidates: s.filter.skipViewedCandidates
+      keepBrowserOpenAfterRun: s.run.keepBrowserOpenAfterRun
     }
   }
 }

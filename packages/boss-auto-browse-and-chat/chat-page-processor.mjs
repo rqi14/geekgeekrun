@@ -8,8 +8,10 @@ import { readConfigFile, getMergedJobConfig } from './runtime-file-utils.mjs'
 import { setupNetworkInterceptor, parseGeekInfoFromIntercepted } from './resume-extractor.mjs'
 import { createHumanCursor } from './humanMouse.mjs'
 import { dismissBlockingOverlays } from './dialog-dismisser.mjs'
+import { classifyConversationBatch } from './chat-page-batch.mjs'
 import {
   openOnlineResume,
+  closeOnlineResumeIfOpen,
   getOnlineResumeText,
   requestAttachmentResume,
   openPreviewAndDownloadPdf,
@@ -28,16 +30,23 @@ import {
   CHAT_PAGE_ITEM_UNREAD_SELECTOR,
   CHAT_PAGE_ALL_FILTER_SELECTOR,
   CHAT_PAGE_UNREAD_FILTER_SELECTOR,
-  CHAT_PAGE_TAB_NEW_GREET_SELECTOR,
   CHAT_PAGE_NAME_SELECTOR,
   CHAT_PAGE_JOB_SELECTOR,
   CHAT_PAGE_PREVIEW_RESUME_BTN_SELECTOR,
-  CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR,
   CHAT_PAGE_JOB_DROPDOWN_SELECTOR,
   CHAT_PAGE_JOB_ITEM_SELECTOR
 } from './constant.mjs'
 
 const LOG = '[chat-page-processor]'
+
+const makeChatPageProcessResult = (overrides = {}) => ({
+  totalProcessed: 0,
+  totalAttempted: 0,
+  unreadExhausted: false,
+  reachedMaxProcessPerRun: false,
+  skipped: false,
+  ...overrides
+})
 
 /**
  * 在沟通页切换到指定职位。
@@ -309,7 +318,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
   let page = existingPage
   if (!page) {
     logInfo(`${LOG} 未传入 page，跳过沟通页处理。`)
-    return
+    return makeChatPageProcessResult({ unreadExhausted: true, skipped: true })
   }
 
   const baseConfig = readConfigFile('boss-recruiter.json') || {}
@@ -318,7 +327,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
   const chatPageConfig = config.chatPage || {}
   if (chatPageConfig.enabled === false) {
     logInfo(`${LOG} 沟通页处理已关闭，跳过。`)
-    return
+    return makeChatPageProcessResult({ unreadExhausted: true, skipped: true })
   }
 
   const maxProcessPerRun = chatPageConfig.maxProcessPerRun ?? 20
@@ -391,9 +400,9 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const box = await tabEl.boundingBox().catch(() => null)
       if (box) {
         await cursor.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 })
-        await sleepWithRandomDelay(400, 600)
+        await sleepWithRandomDelay(180, 320)
         try {
-          await page.waitForSelector(CHAT_PAGE_ITEM_SELECTOR, { timeout: 5000 })
+          await page.waitForSelector(CHAT_PAGE_ITEM_SELECTOR, { timeout: opts.listTimeoutMs ?? 1500 })
           logDebug(`${LOG} 「${tabName}」tab 切换后列表已刷新`)
         } catch {
           logDebug(`${LOG} 「${tabName}」tab 切换后列表为空（无会话）`)
@@ -412,35 +421,21 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       if (processContext) processContext.currentCandidate = item
 
       const { contacted } = await checkIfAlreadyContacted(encryptGeekId, hooks)
-      if (contacted) {
-        logInfo(`${LOG}   → 已在数据库中联系过，跳过`)
-        if (processContext) processContext.currentCandidate = null
-        return { processed: false, skipped: true }
+      const alreadyContacted = contacted === true
+      if (alreadyContacted) {
+        logInfo(`${LOG}   → 已在数据库中联系过，仍会检查是否有附件简历请求/附件消息`)
+      } else {
+        logDebug(`${LOG}   → 数据库未记录，继续处理`)
       }
-      logDebug(`${LOG}   → 数据库未记录，继续处理`)
 
       // 切换会话前必须确保在线简历弹窗已关闭。
       // 弹窗遮挡会导致下方会话列表的点击被拦截，使会话无法切换（右侧面板仍显示上一个人），
       // 进而导致打开的在线简历是上一个候选人的数据。
+      // 用 iframe 判定是否打开、Esc 优先关闭，对 BOSS 改版（关闭按钮 selector 失配）更鲁棒。
       {
-        const resumeCloseBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-        if (resumeCloseBtn) {
-          logDebug(`${LOG}   → 检测到在线简历弹窗未关闭，点击关闭...`)
-          const closeBox = await resumeCloseBtn.boundingBox().catch(() => null)
-          if (closeBox) {
-            await cursor.click({ x: closeBox.x + closeBox.width / 2, y: closeBox.y + closeBox.height / 2 })
-          } else {
-            await resumeCloseBtn.click().catch(() => {})
-          }
-          try {
-            await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR, { hidden: true, timeout: 4000 })
-            logDebug(`${LOG}   → 在线简历弹窗已关闭`)
-          } catch {
-            const stillOpen = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-            if (stillOpen) {
-              logWarn(`${LOG}   → 在线简历弹窗关闭失败（4s 超时），继续尝试切换会话，但可能影响会话切换成功率`)
-            }
-          }
+        const closed = await closeOnlineResumeIfOpen(page, { cursor })
+        if (!closed) {
+          logWarn(`${LOG}   → 在线简历弹窗关闭失败，继续尝试切换会话，但可能影响会话切换成功率`)
         }
       }
 
@@ -454,7 +449,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         return { processed: false, skipped: true }
       }
       logInfo(`${LOG}   → 会话已选中，等待页面加载...`)
-      await sleepWithRandomDelay(600, 1200)
+      await sleepWithRandomDelay(300, 600)
 
       // 验证右侧面板已切换到目标候选人（防止会话点击未生效、面板仍停留在上一人）
       {
@@ -502,6 +497,62 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
       }
 
+      // 附件简历消息优先级最高：推荐页打招呼后的候选人可能已在数据库中标记为 contacted，
+      // 但他们后续主动发来的“是否同意发送附件简历”仍必须被接住，不能被筛选或去重逻辑跳过。
+      let acceptedIncoming = false
+      const hasIncoming = await hasIncomingAttachResumeRequest(page)
+      if (hasIncoming) {
+        logInfo(`${LOG}   → 检测到对方主动发送附件简历请求，自动点击"同意"...`)
+        const accepted = await acceptIncomingAttachResume(page, { cursor })
+        if (accepted) {
+          acceptedIncoming = true
+          logInfo(`${LOG}   → 已同意对方发送附件简历`)
+          await logContact(encryptGeekId, 'attachment_resume_accepted_incoming', null, 'success', hooks)
+          await sleepWithRandomDelay(250, 500)
+        } else {
+          logWarn(`${LOG}   → 点击"同意"失败（按钮未找到或不可见）`)
+        }
+      }
+
+      // 先检查：对方是否已发来附件简历消息（我方此前请求已被对方同意，或上方同意后出现预览按钮）
+      const hasAttachment = await hasAttachmentResumeInCurrentChat(page)
+      logInfo(`${LOG}   → 附件简历检查：${hasAttachment ? '已有（对方已发来附件）' : '无'}`)
+
+      if (hasAttachment) {
+        if (skipAttachmentResumeDownload) {
+          logInfo(`${LOG}   → 已有附件简历，但 skipDownload=true（已配置自动发邮箱），跳过 PDF 下载`)
+        } else {
+          logInfo(`${LOG}   → 下载附件简历...`)
+          const { clickedDownload } = await openPreviewAndDownloadPdf(page, null, { cursor })
+          if (clickedDownload) {
+            logInfo(`${LOG}   → 附件简历下载成功`)
+            await logContact(encryptGeekId, 'attachment_resume_downloaded', null, 'success', hooks)
+          } else {
+            logWarn(`${LOG}   → 附件简历下载失败（未找到下载按钮）`)
+          }
+        }
+        await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
+        getInterceptedData()
+        await sleepWithRandomDelay(300, 700)
+        if (processContext) processContext.currentCandidate = null
+        return { processed: true, skipped: false }
+      }
+
+      if (acceptedIncoming) {
+        logInfo(`${LOG}   → 已同意附件简历请求，等待对方附件消息后续进入未读列表`)
+        await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
+        getInterceptedData()
+        await sleepWithRandomDelay(250, 500)
+        if (processContext) processContext.currentCandidate = null
+        return { processed: true, skipped: false }
+      }
+
+      if (alreadyContacted) {
+        logInfo(`${LOG}   → 已联系过且当前无附件请求/附件消息，跳过后续筛选和索取`)
+        if (processContext) processContext.currentCandidate = null
+        return { processed: false, skipped: true }
+      }
+
       // 阶段一：初步信息筛选（点击会话后 geek/info 已触发，从拦截数据取结构化字段）
       // 注意：使用 peekInterceptedData（不清空）而非 getInterceptedData（清空），避免数据被消费后简历筛选阶段拿不到
       if (hasPreFilter) {
@@ -529,7 +580,8 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
               city: geekInfoData.city ?? null,
               salary: geekInfoData.salaryDesc ?? geekInfoData.price ?? null
             }
-            const { skipped } = filterCandidates([candidateForFilter], preFilterConf)
+            const { customRules, ...earlyPreFilterConf } = preFilterConf
+            const { skipped } = filterCandidates([candidateForFilter], earlyPreFilterConf)
             if (skipped.length > 0) {
               const reason = skipped[0].filterResult.reasonDetail || skipped[0].filterResult.reason
               logInfo(`${LOG}   → 初步信息筛选不通过：${reason}，跳过`)
@@ -549,43 +601,6 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
       }
 
-      // 检查候选人是否主动发来了附件简历请求（"同意/拒绝"提示），若有则自动同意
-      const hasIncoming = await hasIncomingAttachResumeRequest(page)
-      if (hasIncoming) {
-        logInfo(`${LOG}   → 检测到对方主动发送附件简历请求，自动点击"同意"...`)
-        const accepted = await acceptIncomingAttachResume(page, { cursor })
-        if (accepted) {
-          logInfo(`${LOG}   → 已同意对方发送附件简历`)
-          await logContact(encryptGeekId, 'attachment_resume_accepted_incoming', null, 'success', hooks)
-        } else {
-          logWarn(`${LOG}   → 点击"同意"失败（按钮未找到或不可见）`)
-        }
-      }
-
-      // 先检查：对方是否已发来附件简历消息（我方此前请求已被对方同意，或上方同意后出现预览按钮）
-      const hasAttachment = await hasAttachmentResumeInCurrentChat(page)
-      logInfo(`${LOG}   → 附件简历检查：${hasAttachment ? '已有（对方已发来附件）' : '无'}`)
-
-      if (hasAttachment) {
-        if (skipAttachmentResumeDownload) {
-          logInfo(`${LOG}   → 已有附件简历，但 skipDownload=true（已配置自动发邮箱），跳过 PDF 下载`)
-        } else {
-          logInfo(`${LOG}   → 下载附件简历...`)
-          const { clickedDownload } = await openPreviewAndDownloadPdf(page, null, { cursor })
-          if (clickedDownload) {
-            logInfo(`${LOG}   → 附件简历下载成功`)
-            await logContact(encryptGeekId, 'attachment_resume_downloaded', null, 'success', hooks)
-          } else {
-            logWarn(`${LOG}   → 附件简历下载失败（未找到下载按钮）`)
-          }
-        }
-        await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
-        getInterceptedData()
-        await sleepWithRandomDelay(2000, 4000)
-        if (processContext) processContext.currentCandidate = null
-        return { processed: true, skipped: false }
-      }
-
       // 无附件简历 → 说明对方只是打招呼，需要我方先筛选再决定是否索取
       logInfo(`${LOG}   → 对方打招呼，点击查看在线简历...`)
       if (typeof clearCapturedText === 'function') {
@@ -596,7 +611,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         logWarn(`${LOG}   → 未找到「查看在线简历」按钮或 iframe 未出现，跳过`)
         await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'viewed' }, hooks)
         getInterceptedData()
-        await sleepWithRandomDelay(500, 1000)
+        await sleepWithRandomDelay(250, 500)
         if (processContext) processContext.currentCandidate = null
         return { processed: false, skipped: true }
       }
@@ -662,12 +677,28 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         logInfo(`${LOG}   → 简历文本获取成功（共 ${resumeText.length} 字）`)
       }
 
-      await sleepWithRandomDelay(2000, 4500)
+      await sleepWithRandomDelay(300, 700)
 
       let pass = true
       let filterReason = ''
 
-      if (mode === 'keywords') {
+      if (Array.isArray(preFilterConf.customRules) && preFilterConf.customRules.length > 0) {
+        const { skipped } = filterCandidates([{
+          encryptGeekId,
+          geekName,
+          resumeText,
+          profile: resumeText
+        }], { customRules: preFilterConf.customRules })
+        if (skipped.length > 0) {
+          pass = false
+          filterReason = skipped[0].filterResult.reasonDetail || skipped[0].filterResult.reason
+          logInfo(`${LOG}   → 自定义硬筛规则不通过：${filterReason}`)
+        }
+      }
+
+      if (!pass) {
+        // 自定义硬筛已拒绝，跳过后续关键词/LLM 评分。
+      } else if (mode === 'keywords') {
         const normalized = (resumeText || '').toLowerCase()
         const hasKeyword = keywordList.length === 0 || keywordList.some((kw) => normalized.includes((kw || '').toLowerCase()))
         pass = hasKeyword
@@ -699,22 +730,13 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
 
       if (pass) {
         logInfo(`${LOG}   → 筛选通过，发送索取附件简历请求...`)
-        const openResumeCloseBtn = await page.$(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR).catch(() => null)
-        if (openResumeCloseBtn) {
-          logDebug(`${LOG}   → 先关闭在线简历弹窗，避免遮挡附件简历按钮...`)
-          const closeBox2 = await openResumeCloseBtn.boundingBox().catch(() => null)
-          if (closeBox2) {
-            await cursor.click({ x: closeBox2.x + closeBox2.width / 2, y: closeBox2.y + closeBox2.height / 2 })
-          } else {
-            await openResumeCloseBtn.click().catch(() => {})
-          }
-          try {
-            await page.waitForSelector(CHAT_PAGE_ONLINE_RESUME_CLOSE_SELECTOR, { hidden: true, timeout: 3000 })
-            logDebug(`${LOG}   → 在线简历弹窗已关闭`)
-          } catch {
+        // 先关闭在线简历弹窗，避免遮挡附件简历按钮（iframe 判定 + Esc 优先，鲁棒于改版）
+        {
+          const resumeClosed = await closeOnlineResumeIfOpen(page, { cursor })
+          if (!resumeClosed) {
             logWarn(`${LOG}   → 在线简历弹窗关闭超时，继续尝试（可能影响附件简历按钮点击）`)
           }
-          await sleepWithRandomDelay(500, 1000)
+          await sleepWithRandomDelay(250, 500)
         }
         const { requested, error } = await requestAttachmentResume(page, { cursor })
         if (requested) {
@@ -726,6 +748,8 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
       } else {
         logInfo(`${LOG}   → 筛选不通过（${filterReason}），跳过`)
+        // 筛选不通过时也需关闭在线简历弹窗，否则弹窗遮挡下一个会话点击（表现为后续全部「会话切换未生效」）
+        await closeOnlineResumeIfOpen(page, { cursor })
         await logContact(encryptGeekId, 'resume_screened_out', null, filterReason || 'screened_out', hooks)
       }
 
@@ -740,20 +764,17 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         hooks
       )
       getInterceptedData()
-      await sleepWithRandomDelay(2000, 4500)
+      await sleepWithRandomDelay(300, 700)
       if (processContext) processContext.currentCandidate = null
       return { processed: true, skipped: false }
     }
     // ────────────────────────────────────────────────────────────────────────────
 
-    // ── 职位 tab 初始化：切换到「新招呼」分类，再强制点击「未读」触发列表刷新 ────────
-    // 必须先进入「新招呼」分类，才能只扫描当前职位下候选人主动发来的招呼，避免遍历其他类型会话。
-    // 「未读」tab 只有被实际点击时 BOSS 才会刷新列表；若上次运行后页面已停在「未读」tab，
-    // 不点击则不会刷新，已处理过的会话仍会出现，导致重复操作。因此此处强制点击（force: true）。
-    await switchToTab(CHAT_PAGE_TAB_NEW_GREET_SELECTOR, '新招呼', { force: true })
-    await sleepWithRandomDelay(300, 500)
+    // ── 初始化：强制点击「未读」触发列表刷新 ─────────────────────────
+    // 推荐牛人回流的附件简历请求会进入未读；扫描未读即可接住确认卡片。
+    // 若上次运行后页面已停在「未读」tab，不点击则可能不刷新，因此这里保留 force。
     await switchToTab(CHAT_PAGE_UNREAD_FILTER_SELECTOR, '未读', { force: true })
-    await sleepWithRandomDelay(400, 600)
+    await sleepWithRandomDelay(150, 250)
     // ────────────────────────────────────────────────────────────────────────────
 
     // ── 验证恢复：若上次被验证中断，优先重试被中断的候选人 ────────────────────────
@@ -765,7 +786,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const retrySel = await selectConversationById(page, retryCandidate.encryptGeekId, { cursor })
       if (retrySel) {
         logInfo(`${LOG} 重试候选人会话已找到，开始处理...`)
-        await sleepWithRandomDelay(600, 1200)
+        await sleepWithRandomDelay(300, 600)
         await processOneCandidateConversation(retryCandidate)
       } else {
         logWarn(`${LOG} 未在「全部」会话中找到重试候选人 ${retryCandidate.geekName}（可能已被处理或不可见），跳过`)
@@ -775,29 +796,34 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       await sleepWithRandomDelay(300)
     }
 
-    // ── 正常扫描：处理「新招呼」分类下的未读会话 ─────────────────────────────────
-    // 「新招呼」分类与「未读」tab 已在上方初始化阶段完成切换（force: true），此处直接解析列表。
+    // ── 正常扫描：处理当前职位下的未读会话 ────────────────────────────
     // 若经过 retryCandidate 流程，retry 结束时已切回「未读」tab，状态同样正确。
 
     // ── 批次循环：每处理 BATCH_REFRESH_SIZE 条后重新点击「未读」刷新列表（步骤4-5）────
     const BATCH_REFRESH_SIZE = 10
     let totalAttempted = 0
     let totalProcessed = 0
+    let unreadExhausted = false
     const seenIds = new Set()
 
     while (totalAttempted < maxProcessPerRun) {
       const conversations = await parseConversationList(page)
       logDebug(`${LOG} DOM 解析到 ${conversations.length} 条会话`)
 
-      const unreadItems = conversations.filter((c) => c.encryptGeekId && !seenIds.has(c.encryptGeekId))
-      if (unreadItems.length === 0) {
+      const batchSize = Math.min(BATCH_REFRESH_SIZE, maxProcessPerRun - totalAttempted)
+      const batchState = classifyConversationBatch(conversations, seenIds, batchSize)
+      if (batchState.unreadExhausted) {
         logInfo(`${LOG} 「未读」列表为空，全部处理完毕`)
+        unreadExhausted = true
+        break
+      }
+      if (batchState.onlySeenVisible) {
+        logInfo(`${LOG} 「未读」列表仍有 ${batchState.visibleCount} 条本轮已处理会话，停止本轮并交给下一轮刷新确认`)
         break
       }
 
-      const batchSize = Math.min(BATCH_REFRESH_SIZE, maxProcessPerRun - totalAttempted)
-      const batch = unreadItems.slice(0, batchSize)
-      logInfo(`${LOG} 当前未读 ${unreadItems.length} 条，本批次处理 ${batch.length} 条（已尝试 ${totalAttempted}/${maxProcessPerRun}）`)
+      const batch = batchState.batch
+      logInfo(`${LOG} 当前未读 ${batchState.unseenCount} 条，本批次处理 ${batch.length} 条（已尝试 ${totalAttempted}/${maxProcessPerRun}）`)
 
       await hooks.onProgress?.promise?.({ phase: 'chatPage', current: totalProcessed, max: maxProcessPerRun }).catch(() => {})
 
@@ -821,10 +847,17 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       // 步骤4：每批次结束后重新点击「未读」标签，刷新列表
       logInfo(`${LOG} 本批次结束，重新点击「未读」标签刷新列表...`)
       await switchToTab(CHAT_PAGE_UNREAD_FILTER_SELECTOR, '未读', { force: true })
-      await sleepWithRandomDelay(400, 600)
+      await sleepWithRandomDelay(150, 250)
     }
 
+    const reachedMaxProcessPerRun = totalAttempted >= maxProcessPerRun && !unreadExhausted
     logInfo(`${LOG} 本次共处理 ${totalProcessed} 条未读会话（尝试 ${totalAttempted} 条）`)
+    return makeChatPageProcessResult({
+      totalProcessed,
+      totalAttempted,
+      unreadExhausted,
+      reachedMaxProcessPerRun
+    })
   } catch (err) {
     await hooks.onError?.promise?.(err)
     throw err

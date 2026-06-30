@@ -2,44 +2,37 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeRecommendConfig, toSavePayload, DEFAULTS } from './mapping.mjs'
 
-test('fills defaults when configs empty', () => {
-  const s = normalizeRecommendConfig({ 'boss-recruiter.json': {}, 'candidate-filter.json': {} })
+// 推荐牛人页只负责运行预算/节奏；筛选与评分按职位在「职位配置」里设置,本页不读写它们。
+
+test('fills budget/run defaults when config empty', () => {
+  const s = normalizeRecommendConfig({ 'boss-recruiter.json': {} })
   assert.equal(s.budget.maxGreetPerRun, DEFAULTS.maxGreetPerRun)
   assert.equal(s.budget.maxScrollSteps, DEFAULTS.maxScrollSteps)
-  assert.equal(s.scoring.enabled, false)
-  assert.equal(s.scoring.onScoreError, 'skip')
-  assert.deepEqual(s.filter.expectSchoolKeywords, [])
+  assert.equal(s.run.clickNotInterestedForFiltered, true)
 })
-test('reads existing values', () => {
+test('reads existing budget values', () => {
   const s = normalizeRecommendConfig({
     'boss-recruiter.json': {
-      recommendPage: { maxGreetPerRun: 3, maxXPerRun: 5 },
-      scoring: { enabled: true, jd: 'x', minScoreToChat: 70 }
-    },
-    'candidate-filter.json': { expectSchoolKeywords: ['双一流'], expectSalaryRange: [10, 20] }
+      recommendPage: { maxGreetPerRun: 3, maxXPerRun: 5 }
+    }
   })
   assert.equal(s.budget.maxGreetPerRun, 3)
   assert.equal(s.budget.maxXPerRun, 5)
-  assert.equal(s.scoring.enabled, true)
-  assert.equal(s.scoring.minScoreToChat, 70)
-  assert.deepEqual(s.filter.expectSchoolKeywords, ['双一流'])
 })
-test('toSavePayload round-trips key names the IPC + orchestrator expect', () => {
-  const s = normalizeRecommendConfig({ 'boss-recruiter.json': {}, 'candidate-filter.json': {} })
-  s.filter.expectSchoolKeywords = ['QS']
-  s.filter.expectMajorKeywords = ['食品']
-  s.scoring.enabled = true
-  s.scoring.jd = 'JD here'
+test('toSavePayload writes only recommendPage (no filter/scoring/advanced keys)', () => {
+  const s = normalizeRecommendConfig({ 'boss-recruiter.json': {} })
   s.budget.maxGreetPerRun = 2
   const p = toSavePayload(s)
-  assert.deepEqual(p.expectSchoolKeywords, ['QS'])
-  assert.deepEqual(p.expectMajorKeywords, ['食品'])
-  assert.equal(p.scoring.enabled, true)
-  assert.equal(p.scoring.jd, 'JD here')
   assert.equal(p.recommendPage.maxGreetPerRun, 2)
+  // 不得携带全局筛选/评分键,以免覆盖按职位配置的回退值;
+  // persistProfile 改由「全局运行设置」页统一管理,本页不再写 advanced
+  assert.equal('scoring' in p, false)
+  assert.equal('expectSchoolKeywords' in p, false)
+  assert.equal('skipViewedCandidates' in p, false)
+  assert.equal('advanced' in p, false)
 })
 test('scoreConcurrency/scoreMaxAttempts/maxViewPerRun: defaults + round-trip', () => {
-  const empty = normalizeRecommendConfig({ 'boss-recruiter.json': {}, 'candidate-filter.json': {} })
+  const empty = normalizeRecommendConfig({ 'boss-recruiter.json': {} })
   assert.equal(empty.budget.scoreConcurrency, DEFAULTS.scoreConcurrency)
   assert.equal(empty.budget.scoreMaxAttempts, DEFAULTS.scoreMaxAttempts)
   assert.equal(empty.budget.maxViewPerRun, DEFAULTS.maxViewPerRun)
@@ -47,8 +40,7 @@ test('scoreConcurrency/scoreMaxAttempts/maxViewPerRun: defaults + round-trip', (
   const s = normalizeRecommendConfig({
     'boss-recruiter.json': {
       recommendPage: { scoreConcurrency: 2, scoreMaxAttempts: 5, maxViewPerRun: 8 }
-    },
-    'candidate-filter.json': {}
+    }
   })
   assert.equal(s.budget.scoreConcurrency, 2)
   assert.equal(s.budget.scoreMaxAttempts, 5)
@@ -59,26 +51,17 @@ test('scoreConcurrency/scoreMaxAttempts/maxViewPerRun: defaults + round-trip', (
   assert.equal(p.recommendPage.scoreMaxAttempts, 5)
   assert.equal(p.recommendPage.maxViewPerRun, 8)
 })
-test('clamps ranges (min<=max)', () => {
+test('clamps budget ranges (min<=max)', () => {
   const s = normalizeRecommendConfig({
-    'boss-recruiter.json': {},
-    'candidate-filter.json': { expectSalaryRange: [30, 10] }
+    'boss-recruiter.json': { recommendPage: { scrollDelayMsRange: [2000, 800] } }
   })
-  assert.ok(s.filter.expectSalaryRange[0] <= s.filter.expectSalaryRange[1])
-})
-test('skipViewed prefers recommendPage over candidate-filter', () => {
-  const s = normalizeRecommendConfig({
-    'boss-recruiter.json': { recommendPage: { skipViewedCandidates: true } },
-    'candidate-filter.json': { skipViewedCandidates: false }
-  })
-  assert.equal(s.filter.skipViewedCandidates, true)
+  assert.ok(s.budget.scrollDelayMsRange[0] <= s.budget.scrollDelayMsRange[1])
 })
 test('clickNotInterestedForFiltered defaults true, false respected', () => {
-  const on = normalizeRecommendConfig({ 'boss-recruiter.json': {}, 'candidate-filter.json': {} })
+  const on = normalizeRecommendConfig({ 'boss-recruiter.json': {} })
   assert.equal(on.run.clickNotInterestedForFiltered, true)
   const off = normalizeRecommendConfig({
-    'boss-recruiter.json': { recommendPage: { clickNotInterestedForFiltered: false } },
-    'candidate-filter.json': {}
+    'boss-recruiter.json': { recommendPage: { clickNotInterestedForFiltered: false } }
   })
   assert.equal(off.run.clickNotInterestedForFiltered, false)
   assert.equal(toSavePayload(off).recommendPage.clickNotInterestedForFiltered, false)

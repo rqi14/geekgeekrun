@@ -131,6 +131,14 @@ const routes: Array<RouteRecordRaw> = [
         }
       },
       {
+        name: 'BossGlobalSettings',
+        path: 'BossGlobalSettings',
+        component: () => import('@renderer/page/MainLayout/BossGlobalSettings/index.vue'),
+        meta: {
+          title: '全局运行设置'
+        }
+      },
+      {
         name: 'BossJobConfig',
         path: 'BossJobConfig',
         component: () => import('@renderer/page/MainLayout/BossJobConfig/index.vue'),

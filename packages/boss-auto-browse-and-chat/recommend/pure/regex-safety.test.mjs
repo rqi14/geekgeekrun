@@ -25,3 +25,14 @@ test('valid education regex still filters', () => {
   assert.equal(res.skipped.length, 1)
   assert.equal(res.skipped[0].filterResult.reason, 'education')
 })
+
+test('invalid customRules regex does not throw and blocks nobody', () => {
+  const c = { encryptGeekId: 'd', geekName: '赵六', education: '硕士' }
+  let res
+  assert.doesNotThrow(() => {
+    res = filterCandidates([c], {
+      customRules: [{ field: 'name', operator: 'regex', pattern: '[', action: 'reject' }]
+    })
+  })
+  assert.equal(res.matched.length, 1)
+})
