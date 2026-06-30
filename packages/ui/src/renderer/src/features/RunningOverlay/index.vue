@@ -82,11 +82,11 @@ import { useTaskManagerStore } from '@renderer/store'
 import { getAutoStartChatSteps } from '../../../../common/prerequisite-step-by-step-check'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import {
-  AUTO_CHAT_ERROR_EXIT_CODE,
   RUNNING_STATUS_ENUM
 } from '../../../../common/enums/auto-start-chat'
 import { gtagRenderer } from '@renderer/utils/gtag'
 import { ElNotification } from 'element-plus'
+import { getRunningOverlayExitAction } from './worker-exit'
 const props = defineProps({
   workerId: {
     type: String
@@ -268,18 +268,14 @@ function workerExitedHandler(
   ) {
     return
   }
-  if (code !== AUTO_CHAT_ERROR_EXIT_CODE.NORMAL) {
-    currentRunningStatus.value = RUNNING_STATUS_ENUM.ERROR_EXITED
-    gtagRenderer('running_overlay_error_exited', {
-      exitCode: code,
-      workerId: props.workerId
-    })
-  } else {
-    currentRunningStatus.value = RUNNING_STATUS_ENUM.NORMAL_EXITED
-    gtagRenderer('running_overlay_normal_exited', {
-      exitCode: code,
-      workerId: props.workerId
-    })
+  const exitAction = getRunningOverlayExitAction(code)
+  currentRunningStatus.value = exitAction.status
+  gtagRenderer(exitAction.analyticsEvent, {
+    exitCode: code,
+    workerId: props.workerId
+  })
+  if (exitAction.shouldHide) {
+    hide()
   }
 }
 const unListenWorkerExited = ipcRenderer.on('worker-exited', workerExitedHandler)

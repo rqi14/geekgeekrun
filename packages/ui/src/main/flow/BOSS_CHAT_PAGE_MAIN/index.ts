@@ -13,10 +13,10 @@ import { getLastUsedAndAvailableBrowser } from '../DOWNLOAD_DEPENDENCIES/utils/b
 import { refreshChatPageForNextRound } from './reusable-page'
 import {
   combineChatPageRoundResults,
-  shouldStopChatWorkerAfterRound,
   skippedChatPageProcessResult,
   type ChatPageProcessResult
 } from './round-result'
+import { stopChatWorkerAfterRoundIfNeeded } from './round-completion'
 import path from 'path'
 const { default: SqlitePlugin } = SqlitePluginModule
 
@@ -337,18 +337,18 @@ const runChatPage = async () => {
       const round = combineChatPageRoundResults(roundResults)
       log(`沟通页本轮汇总：处理 ${round.totalProcessed} 条，尝试 ${round.totalAttempted} 条，unreadExhausted=${round.unreadExhausted}，reachedMax=${round.reachedMaxProcessPerRun}`)
 
-      if (shouldStopChatWorkerAfterRound({ runOnceAfterComplete, round })) {
-        if (keepBrowserOpenAfterRun) {
-          log('运行已结束，浏览器保持打开，请手动关闭浏览器窗口后将自动退出')
-          await new Promise<void>((resolve) => {
-            browser!.once('disconnected', () => resolve())
-          })
-        } else {
-          try { await browser.close() } catch (e) { void e }
+      const stopped = await stopChatWorkerAfterRoundIfNeeded({
+        runOnceAfterComplete,
+        round,
+        keepBrowserOpenAfterRun,
+        browser,
+        log,
+        exit: (code) => {
+          app.exit(code)
+          process.exit(code)
         }
-        log(runOnceAfterComplete ? '已配置 runOnceAfterComplete，本次运行后停止' : '未读列表已清空，沟通任务自动结束')
-        process.exit(0)
-      }
+      })
+      if (stopped) return
 
       const rerunMs = cfg?.chatPage?.rerunIntervalMs ?? rerunInterval
       log(`下次运行将在 ${rerunMs}ms 后开始`)
