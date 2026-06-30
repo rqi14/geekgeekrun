@@ -18,6 +18,86 @@ const defaultConfigFileContentMap = {
   'candidate-filter.json': JSON.stringify(defaultCandidateFilterConf)
 }
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
+
+function listFromMaybe (value) {
+  if (Array.isArray(value)) return value.map(v => String(v ?? '').trim()).filter(Boolean)
+  if (typeof value === 'string') return value.split(/[,，\n]/).map(v => v.trim()).filter(Boolean)
+  return []
+}
+
+function legacyHardFilterRulesFrom (f, pf) {
+  const fieldRules = pf.fieldRules ?? f.fieldRules ?? {}
+  const exclude = listFromMaybe(fieldRules.exclude)
+  const include = listFromMaybe(fieldRules.include)
+  const skills = listFromMaybe(pf.expectSkillKeywords ?? f.expectSkillKeywords)
+  const schools = listFromMaybe(pf.expectSchoolKeywords ?? f.expectSchoolKeywords)
+  const majors = listFromMaybe(pf.expectMajorKeywords ?? f.expectMajorKeywords)
+  const namePattern = String(pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '').trim()
+  const rules = []
+
+  if (exclude.length) {
+    const rule = {
+      enabled: true,
+      field: 'all',
+      operator: 'containsAny',
+      keywords: exclude,
+      pattern: '',
+      action: 'reject',
+      label: '命中不对口关键词'
+    }
+    if (include.length) {
+      rule.except = { field: 'all', operator: 'containsAny', keywords: include, pattern: '' }
+    }
+    rules.push(rule)
+  }
+  if (skills.length) {
+    rules.push({
+      enabled: true,
+      field: 'skills',
+      operator: 'notContainsAny',
+      keywords: skills,
+      pattern: '',
+      action: 'reject',
+      label: '技能/优势必须命中'
+    })
+  }
+  if (schools.length) {
+    rules.push({
+      enabled: true,
+      field: 'school',
+      operator: 'notContainsAny',
+      keywords: schools,
+      pattern: '',
+      action: 'reject',
+      label: '院校/标签必须命中'
+    })
+  }
+  if (majors.length) {
+    rules.push({
+      enabled: true,
+      field: 'major',
+      operator: 'notContainsAny',
+      keywords: majors,
+      pattern: '',
+      action: 'reject',
+      label: '专业必须命中'
+    })
+  }
+  if (namePattern) {
+    rules.push({
+      enabled: true,
+      field: 'name',
+      operator: 'regex',
+      keywords: [],
+      pattern: namePattern,
+      action: 'reject',
+      label: '姓名命中屏蔽正则'
+    })
+  }
+  return rules
+}
+
 const runtimeFolderPath = path.join(os.homedir(), '.geekgeekrun')
 export const configFolderPath = path.join(runtimeFolderPath, 'config')
 
@@ -174,6 +254,9 @@ export function migrateJobFilter (filter) {
     expectMajorKeywords: pf.expectMajorKeywords ?? f.expectMajorKeywords ?? [],
     blockCandidateNameRegExpStr: pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '',
     fieldRules: pf.fieldRules ?? f.fieldRules ?? { include: [], exclude: [] },
+    customRules: hasOwn(pf, 'customRules')
+      ? pf.customRules
+      : (hasOwn(f, 'customRules') ? f.customRules : legacyHardFilterRulesFrom(f, pf)),
     schoolFloorRank: pf.schoolFloorRank ?? f.schoolFloorRank ?? null,
     nativeFilter: pf.nativeFilter ?? f.nativeFilter ?? null
   }
@@ -211,7 +294,7 @@ export function migrateJobFilter (filter) {
     'expectWorkExpMinEnabled', 'expectWorkExpMaxEnabled', 'expectWorkExpRange',
     'expectSalaryMinEnabled', 'expectSalaryMaxEnabled', 'expectSalaryRange', 'expectSalaryWhenNegotiable',
     'expectSkillKeywords', 'expectSchoolKeywords', 'expectMajorKeywords', 'blockCandidateNameRegExpStr',
-    'fieldRules', 'schoolFloorRank', 'nativeFilter',
+    'fieldRules', 'customRules', 'schoolFloorRank', 'nativeFilter',
     'minScoreToChat', 'onScoreError', 'skipViewedCandidates'
   ])
   const preserved = {}
@@ -288,6 +371,7 @@ function jobFilterToCandidateFilter (jobFilter) {
     expectMajorKeywords: Array.isArray(f.expectMajorKeywords) ? f.expectMajorKeywords : [],
     blockCandidateNameRegExpStr:
       typeof f.blockCandidateNameRegExpStr === 'string' ? f.blockCandidateNameRegExpStr : '',
+    customRules: Array.isArray(f.customRules) ? f.customRules : [],
     skipViewedCandidates: m.recommend.skipViewedCandidates === true,
     nativeFilter: f.nativeFilter && typeof f.nativeFilter === 'object' ? f.nativeFilter : undefined
   }

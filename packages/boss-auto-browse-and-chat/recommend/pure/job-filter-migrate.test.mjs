@@ -59,6 +59,65 @@ test('migrate: preFilter card fields carried over', () => {
   assert.deepEqual(m.preFilter.fieldRules, { include: ['材料'], exclude: ['纯生物'] })
 })
 
+test('migrate: legacy hard-filter fields become customRules', () => {
+  const m = migrateJobFilter({
+    fieldRules: { exclude: ['分子生物'], include: ['液滴微流控'] },
+    expectSkillKeywords: ['LC-MS'],
+    expectSchoolKeywords: ['双一流'],
+    expectMajorKeywords: ['食品'],
+    blockCandidateNameRegExpStr: '^张'
+  })
+
+  assert.deepEqual(m.preFilter.customRules, [
+    {
+      enabled: true,
+      field: 'all',
+      operator: 'containsAny',
+      keywords: ['分子生物'],
+      pattern: '',
+      action: 'reject',
+      label: '命中不对口关键词',
+      except: { field: 'all', operator: 'containsAny', keywords: ['液滴微流控'], pattern: '' }
+    },
+    {
+      enabled: true,
+      field: 'skills',
+      operator: 'notContainsAny',
+      keywords: ['LC-MS'],
+      pattern: '',
+      action: 'reject',
+      label: '技能/优势必须命中'
+    },
+    {
+      enabled: true,
+      field: 'school',
+      operator: 'notContainsAny',
+      keywords: ['双一流'],
+      pattern: '',
+      action: 'reject',
+      label: '院校/标签必须命中'
+    },
+    {
+      enabled: true,
+      field: 'major',
+      operator: 'notContainsAny',
+      keywords: ['食品'],
+      pattern: '',
+      action: 'reject',
+      label: '专业必须命中'
+    },
+    {
+      enabled: true,
+      field: 'name',
+      operator: 'regex',
+      keywords: [],
+      pattern: '^张',
+      action: 'reject',
+      label: '姓名命中屏蔽正则'
+    }
+  ])
+})
+
 test('migrate: preserves unknown top-level keys', () => {
   const m = migrateJobFilter({ somethingCustom: 42, resumeLlmEnabled: false })
   assert.equal(m.somethingCustom, 42)

@@ -29,7 +29,6 @@ import {
   CHAT_PAGE_ITEM_UNREAD_SELECTOR,
   CHAT_PAGE_ALL_FILTER_SELECTOR,
   CHAT_PAGE_UNREAD_FILTER_SELECTOR,
-  CHAT_PAGE_TAB_NEW_GREET_SELECTOR,
   CHAT_PAGE_NAME_SELECTOR,
   CHAT_PAGE_JOB_SELECTOR,
   CHAT_PAGE_PREVIEW_RESUME_BTN_SELECTOR,
@@ -412,12 +411,12 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       if (processContext) processContext.currentCandidate = item
 
       const { contacted } = await checkIfAlreadyContacted(encryptGeekId, hooks)
-      if (contacted) {
-        logInfo(`${LOG}   → 已在数据库中联系过，跳过`)
-        if (processContext) processContext.currentCandidate = null
-        return { processed: false, skipped: true }
+      const alreadyContacted = contacted === true
+      if (alreadyContacted) {
+        logInfo(`${LOG}   → 已在数据库中联系过，仍会检查是否有附件简历请求/附件消息`)
+      } else {
+        logDebug(`${LOG}   → 数据库未记录，继续处理`)
       }
-      logDebug(`${LOG}   → 数据库未记录，继续处理`)
 
       // 切换会话前必须确保在线简历弹窗已关闭。
       // 弹窗遮挡会导致下方会话列表的点击被拦截，使会话无法切换（右侧面板仍显示上一个人），
@@ -488,61 +487,18 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
       }
 
-      // 阶段一：初步信息筛选（点击会话后 geek/info 已触发，从拦截数据取结构化字段）
-      // 注意：使用 peekInterceptedData（不清空）而非 getInterceptedData（清空），避免数据被消费后简历筛选阶段拿不到
-      if (hasPreFilter) {
-        logDebug(`${LOG}   → 等待 geek/info 数据（初步筛选，最长 5s）...`)
-        let geekInfoSnap = await waitForGeekInfo(peekInterceptedData, { timeoutMs: 5000 })
-        if (!geekInfoSnap) {
-          logWarn(`${LOG}   → geek/info 未到达，重试点击会话...`)
-          getInterceptedData()
-          const retrySelected = await selectConversationById(page, encryptGeekId, { cursor })
-          if (retrySelected) {
-            await sleepWithRandomDelay(400, 800)
-            geekInfoSnap = await waitForGeekInfo(peekInterceptedData, { timeoutMs: 5000 })
-          }
-        }
-        if (geekInfoSnap) {
-          logDebug(`${LOG}   → geek/info 已到达，解析中...`)
-          const { data: geekInfoData } = parseGeekInfoFromIntercepted(geekInfoSnap)
-          if (geekInfoData) {
-            logInfo(`${LOG}   → geek/info 摘要：学历=${geekInfoData.edu} 工龄=${geekInfoData.workYear} 城市=${geekInfoData.city} 薪资=${geekInfoData.salaryDesc ?? geekInfoData.price}`)
-            const candidateForFilter = {
-              encryptGeekId,
-              geekName,
-              education: geekInfoData.edu ?? null,
-              workExp: geekInfoData.workYear ?? null,
-              city: geekInfoData.city ?? null,
-              salary: geekInfoData.salaryDesc ?? geekInfoData.price ?? null
-            }
-            const { skipped } = filterCandidates([candidateForFilter], preFilterConf)
-            if (skipped.length > 0) {
-              const reason = skipped[0].filterResult.reasonDetail || skipped[0].filterResult.reason
-              logInfo(`${LOG}   → 初步信息筛选不通过：${reason}，跳过`)
-              await logContact(encryptGeekId, 'resume_screened_out', null, `preFilter:${reason}`, hooks)
-              await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'screened_out' }, hooks)
-              getInterceptedData()
-              await sleepWithRandomDelay(300, 600)
-              if (processContext) processContext.currentCandidate = null
-              return { processed: false, skipped: true }
-            }
-            logInfo(`${LOG}   → 初步信息筛选通过`)
-          } else {
-            logDebug(`${LOG}   → geek/info 响应无结构化数据（zpData.data 为空），跳过初步筛选`)
-          }
-        } else {
-          logWarn(`${LOG}   → 等待 geek/info 超时（重试后仍未到达），跳过初步筛选`)
-        }
-      }
-
-      // 检查候选人是否主动发来了附件简历请求（"同意/拒绝"提示），若有则自动同意
+      // 附件简历消息优先级最高：推荐页打招呼后的候选人可能已在数据库中标记为 contacted，
+      // 但他们后续主动发来的“是否同意发送附件简历”仍必须被接住，不能被筛选或去重逻辑跳过。
+      let acceptedIncoming = false
       const hasIncoming = await hasIncomingAttachResumeRequest(page)
       if (hasIncoming) {
         logInfo(`${LOG}   → 检测到对方主动发送附件简历请求，自动点击"同意"...`)
         const accepted = await acceptIncomingAttachResume(page, { cursor })
         if (accepted) {
+          acceptedIncoming = true
           logInfo(`${LOG}   → 已同意对方发送附件简历`)
           await logContact(encryptGeekId, 'attachment_resume_accepted_incoming', null, 'success', hooks)
+          await sleepWithRandomDelay(800, 1400)
         } else {
           logWarn(`${LOG}   → 点击"同意"失败（按钮未找到或不可见）`)
         }
@@ -570,6 +526,69 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         await sleepWithRandomDelay(2000, 4000)
         if (processContext) processContext.currentCandidate = null
         return { processed: true, skipped: false }
+      }
+
+      if (acceptedIncoming) {
+        logInfo(`${LOG}   → 已同意附件简历请求，等待对方附件消息后续进入未读列表`)
+        await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
+        getInterceptedData()
+        await sleepWithRandomDelay(500, 1000)
+        if (processContext) processContext.currentCandidate = null
+        return { processed: true, skipped: false }
+      }
+
+      if (alreadyContacted) {
+        logInfo(`${LOG}   → 已联系过且当前无附件请求/附件消息，跳过后续筛选和索取`)
+        if (processContext) processContext.currentCandidate = null
+        return { processed: false, skipped: true }
+      }
+
+      // 阶段一：初步信息筛选（点击会话后 geek/info 已触发，从拦截数据取结构化字段）
+      // 注意：使用 peekInterceptedData（不清空）而非 getInterceptedData（清空），避免数据被消费后简历筛选阶段拿不到
+      if (hasPreFilter) {
+        logDebug(`${LOG}   → 等待 geek/info 数据（初步筛选，最长 5s）...`)
+        let geekInfoSnap = await waitForGeekInfo(peekInterceptedData, { timeoutMs: 5000 })
+        if (!geekInfoSnap) {
+          logWarn(`${LOG}   → geek/info 未到达，重试点击会话...`)
+          getInterceptedData()
+          const retrySelected = await selectConversationById(page, encryptGeekId, { cursor })
+          if (retrySelected) {
+            await sleepWithRandomDelay(400, 800)
+            geekInfoSnap = await waitForGeekInfo(peekInterceptedData, { timeoutMs: 5000 })
+          }
+        }
+        if (geekInfoSnap) {
+          logDebug(`${LOG}   → geek/info 已到达，解析中...`)
+          const { data: geekInfoData } = parseGeekInfoFromIntercepted(geekInfoSnap)
+          if (geekInfoData) {
+            logInfo(`${LOG}   → geek/info 摘要：学历=${geekInfoData.edu} 工龄=${geekInfoData.workYear} 城市=${geekInfoData.city} 薪资=${geekInfoData.salaryDesc ?? geekInfoData.price}`)
+            const candidateForFilter = {
+              encryptGeekId,
+              geekName,
+              education: geekInfoData.edu ?? null,
+              workExp: geekInfoData.workYear ?? null,
+              city: geekInfoData.city ?? null,
+              salary: geekInfoData.salaryDesc ?? geekInfoData.price ?? null
+            }
+            const { customRules, ...earlyPreFilterConf } = preFilterConf
+            const { skipped } = filterCandidates([candidateForFilter], earlyPreFilterConf)
+            if (skipped.length > 0) {
+              const reason = skipped[0].filterResult.reasonDetail || skipped[0].filterResult.reason
+              logInfo(`${LOG}   → 初步信息筛选不通过：${reason}，跳过`)
+              await logContact(encryptGeekId, 'resume_screened_out', null, `preFilter:${reason}`, hooks)
+              await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'screened_out' }, hooks)
+              getInterceptedData()
+              await sleepWithRandomDelay(300, 600)
+              if (processContext) processContext.currentCandidate = null
+              return { processed: false, skipped: true }
+            }
+            logInfo(`${LOG}   → 初步信息筛选通过`)
+          } else {
+            logDebug(`${LOG}   → geek/info 响应无结构化数据（zpData.data 为空），跳过初步筛选`)
+          }
+        } else {
+          logWarn(`${LOG}   → 等待 geek/info 超时（重试后仍未到达），跳过初步筛选`)
+        }
       }
 
       // 无附件简历 → 说明对方只是打招呼，需要我方先筛选再决定是否索取
@@ -653,7 +672,23 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       let pass = true
       let filterReason = ''
 
-      if (mode === 'keywords') {
+      if (Array.isArray(preFilterConf.customRules) && preFilterConf.customRules.length > 0) {
+        const { skipped } = filterCandidates([{
+          encryptGeekId,
+          geekName,
+          resumeText,
+          profile: resumeText
+        }], { customRules: preFilterConf.customRules })
+        if (skipped.length > 0) {
+          pass = false
+          filterReason = skipped[0].filterResult.reasonDetail || skipped[0].filterResult.reason
+          logInfo(`${LOG}   → 自定义硬筛规则不通过：${filterReason}`)
+        }
+      }
+
+      if (!pass) {
+        // 自定义硬筛已拒绝，跳过后续关键词/LLM 评分。
+      } else if (mode === 'keywords') {
         const normalized = (resumeText || '').toLowerCase()
         const hasKeyword = keywordList.length === 0 || keywordList.some((kw) => normalized.includes((kw || '').toLowerCase()))
         pass = hasKeyword
@@ -725,11 +760,12 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
     }
     // ────────────────────────────────────────────────────────────────────────────
 
-    // ── 职位 tab 初始化：切换到「新招呼」分类，再强制点击「未读」触发列表刷新 ────────
-    // 必须先进入「新招呼」分类，才能只扫描当前职位下候选人主动发来的招呼，避免遍历其他类型会话。
+    // ── 初始化：切换到「全部」范围，再强制点击「未读」触发列表刷新 ────────
+    // 推荐牛人打招呼后的附件简历请求不一定归在「新招呼」分类；
+    // 扫描所有未读才能接住“对方想发送附件简历给您，您是否同意”的卡片。
     // 「未读」tab 只有被实际点击时 BOSS 才会刷新列表；若上次运行后页面已停在「未读」tab，
     // 不点击则不会刷新，已处理过的会话仍会出现，导致重复操作。因此此处强制点击（force: true）。
-    await switchToTab(CHAT_PAGE_TAB_NEW_GREET_SELECTOR, '新招呼', { force: true })
+    await switchToTab(CHAT_PAGE_ALL_FILTER_SELECTOR, '全部', { force: true })
     await sleepWithRandomDelay(300, 500)
     await switchToTab(CHAT_PAGE_UNREAD_FILTER_SELECTOR, '未读', { force: true })
     await sleepWithRandomDelay(400, 600)
@@ -754,8 +790,8 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       await sleepWithRandomDelay(300)
     }
 
-    // ── 正常扫描：处理「新招呼」分类下的未读会话 ─────────────────────────────────
-    // 「新招呼」分类与「未读」tab 已在上方初始化阶段完成切换（force: true），此处直接解析列表。
+    // ── 正常扫描：处理全部范围下的未读会话 ─────────────────────────────────
+    // 「全部」范围与「未读」tab 已在上方初始化阶段完成切换（force: true），此处直接解析列表。
     // 若经过 retryCandidate 流程，retry 结束时已切回「未读」tab，状态同样正确。
 
     // ── 批次循环：每处理 BATCH_REFRESH_SIZE 条后重新点击「未读」刷新列表（步骤4-5）────

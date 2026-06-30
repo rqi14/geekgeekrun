@@ -159,69 +159,118 @@
               </el-form-item>
             </div>
 
-            <div class="form-tip">
-              命中「排除词」且未命中「包含词」→ 不开简历（跳过）；命中「包含词」→ 保留；都不命中 →
-              默认开（交后续步骤决定）。例外词放进「包含词」即可压过排除（如
-              液滴微流控/自组装/冻干）。
+            <div class="section-label compact-section-label">
+              <span>自定义硬筛规则</span>
+              <el-tag size="small" type="danger">推荐 + 沟通 共用</el-tag>
             </div>
-            <el-form-item label="排除词（疑似不对口）" class="flex-1">
-              <el-input
-                v-model="job.filter.fieldExcludeStr"
-                placeholder="多个用逗号分隔，例如：分子生物,细胞生物,免疫,CRISPR"
-                @blur="
-                  job.filter.fieldExcludeStr = normalizeCommaSplittedStr(job.filter.fieldExcludeStr)
-                "
-              />
-            </el-form-item>
-            <el-form-item label="包含/例外词（对口，压过排除）" class="flex-1">
-              <el-input
-                v-model="job.filter.fieldIncludeStr"
-                placeholder="多个用逗号分隔，例如：化工,材料,微球,液滴微流控,自组装,冻干"
-                @blur="
-                  job.filter.fieldIncludeStr = normalizeCommaSplittedStr(job.filter.fieldIncludeStr)
-                "
-              />
-            </el-form-item>
-
-            <el-form-item label="技能关键词" class="flex-1">
-              <el-input
-                v-model="job.filter.expectSkillKeywordsStr"
-                placeholder="多个用逗号分隔，例如：Python,机器学习"
-                @blur="
-                  job.filter.expectSkillKeywordsStr = normalizeCommaSplittedStr(
-                    job.filter.expectSkillKeywordsStr
-                  )
-                "
-              />
-            </el-form-item>
-            <el-form-item label="院校关键词" class="flex-1">
-              <el-input
-                v-model="job.filter.expectSchoolKeywordsStr"
-                placeholder="多个用逗号分隔，例如：清华,北大,985"
-                @blur="
-                  job.filter.expectSchoolKeywordsStr = normalizeCommaSplittedStr(
-                    job.filter.expectSchoolKeywordsStr
-                  )
-                "
-              />
-            </el-form-item>
-            <el-form-item label="专业关键词" class="flex-1">
-              <el-input
-                v-model="job.filter.expectMajorKeywordsStr"
-                placeholder="多个用逗号分隔，例如：化工,材料,计算机"
-                @blur="
-                  job.filter.expectMajorKeywordsStr = normalizeCommaSplittedStr(
-                    job.filter.expectMajorKeywordsStr
-                  )
-                "
-              />
-            </el-form-item>
-            <el-form-item label="屏蔽姓名（正则）" class="flex-1">
-              <el-input
-                v-model="job.filter.blockCandidateNameRegExpStr"
-                placeholder="正则表达式，命中即跳过，例如：^张三$|李四"
-              />
-            </el-form-item>
+            <div class="custom-rules-panel">
+              <div v-if="job.filter.customRules.length === 0" class="empty-rules">
+                暂无自定义硬筛规则
+              </div>
+              <div
+                v-for="(rule, ruleIndex) in job.filter.customRules"
+                :key="rule.id"
+                class="custom-rule-row"
+              >
+                <div class="custom-rule-header">
+                  <el-checkbox v-model="rule.enabled">启用</el-checkbox>
+                  <el-input
+                    v-model="rule.label"
+                    class="rule-label-input"
+                    placeholder="规则名称"
+                    size="small"
+                  />
+                  <el-button size="small" type="danger" plain @click="removeCustomRule(job, ruleIndex)">
+                    删除
+                  </el-button>
+                </div>
+                <div class="custom-rule-line">
+                  <span class="rule-word">如果</span>
+                  <el-select v-model="rule.field" class="rule-field-select" size="small">
+                    <el-option
+                      v-for="opt in customRuleFieldOptions"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <el-select v-model="rule.operator" class="rule-operator-select" size="small">
+                    <el-option
+                      v-for="opt in customRuleOperatorOptions"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <el-input
+                    v-if="rule.operator === 'regex'"
+                    v-model="rule.pattern"
+                    class="rule-value-input"
+                    placeholder="正则表达式，例如：^张三$|李四"
+                    size="small"
+                  />
+                  <el-input
+                    v-else
+                    v-model="rule.keywordsStr"
+                    class="rule-value-input"
+                    placeholder="多个用逗号分隔"
+                    size="small"
+                    @blur="rule.keywordsStr = normalizeCommaSplittedStr(rule.keywordsStr)"
+                  />
+                  <span class="rule-word reject-word">则直接拒绝</span>
+                </div>
+                <div class="custom-rule-except">
+                  <el-checkbox
+                    :model-value="!!rule.except"
+                    @change="toggleRuleExcept(rule, Boolean($event))"
+                  >
+                    除非
+                  </el-checkbox>
+                  <template v-if="rule.except">
+                    <el-select v-model="rule.except.field" class="rule-field-select" size="small">
+                      <el-option
+                        v-for="opt in customRuleFieldOptions"
+                        :key="opt.value"
+                        :label="opt.label"
+                        :value="opt.value"
+                      />
+                    </el-select>
+                    <el-select
+                      v-model="rule.except.operator"
+                      class="rule-operator-select"
+                      size="small"
+                    >
+                      <el-option
+                        v-for="opt in customRuleOperatorOptions"
+                        :key="opt.value"
+                        :label="opt.label"
+                        :value="opt.value"
+                      />
+                    </el-select>
+                    <el-input
+                      v-if="rule.except.operator === 'regex'"
+                      v-model="rule.except.pattern"
+                      class="rule-value-input"
+                      placeholder="正则表达式"
+                      size="small"
+                    />
+                    <el-input
+                      v-else
+                      v-model="rule.except.keywordsStr"
+                      class="rule-value-input"
+                      placeholder="多个用逗号分隔"
+                      size="small"
+                      @blur="
+                        rule.except.keywordsStr = normalizeCommaSplittedStr(
+                          rule.except.keywordsStr
+                        )
+                      "
+                    />
+                  </template>
+                </div>
+              </div>
+              <el-button size="small" plain @click="addCustomRule(job)">+ 添加硬筛规则</el-button>
+            </div>
 
             <!-- ── ② AI 评分标准（Rubric · 唯一真源）── -->
             <div class="section-label">
@@ -420,8 +469,9 @@
                 v-model="job.filter.recommendScoringEnabled"
                 label="推荐页开简历后用上面的 Rubric 精评"
               />
+              <span class="form-tip">按得分排序，再按下方推荐页分数线决定是否沟通</span>
             </div>
-            <el-form-item label="最低进入沟通分数" class="flex-1">
+            <el-form-item label="推荐页打招呼分数线" class="flex-1">
               <el-input-number
                 v-model="job.filter.recommendMinScoreToChat"
                 :min="0"
@@ -430,7 +480,9 @@
                 :disabled="!job.filter.recommendScoringEnabled"
                 placeholder="不填则用 Rubric 通过分"
               />
-              <div class="form-tip">不填则使用上方 Rubric 的通过分数线</div>
+              <div class="form-tip">
+                不填则使用上方 Rubric 通过分数线；推荐名额更珍贵时可设得更高
+              </div>
             </el-form-item>
             <el-form-item label="评分出错时" class="flex-1">
               <el-select
@@ -524,6 +576,24 @@ interface UiRubric {
   dimensions: RubricDimension[]
 }
 
+type CustomRuleField = 'all' | 'profile' | 'skills' | 'school' | 'major' | 'name'
+type CustomRuleOperator = 'containsAny' | 'notContainsAny' | 'regex'
+
+interface UiCustomRuleCondition {
+  field: CustomRuleField
+  operator: CustomRuleOperator
+  keywordsStr: string
+  pattern: string
+}
+
+interface UiCustomRule extends UiCustomRuleCondition {
+  id: string
+  enabled: boolean
+  action: 'reject'
+  label: string
+  except?: UiCustomRuleCondition
+}
+
 interface JobFilter {
   // ── ① 卡片初筛（preFilter）──
   expectCityEnabled: boolean
@@ -537,12 +607,7 @@ interface JobFilter {
   expectSalaryMaxEnabled: boolean
   expectSalaryRange: [number, number]
   expectSalaryWhenNegotiable: 'exclude' | 'include'
-  fieldIncludeStr: string
-  fieldExcludeStr: string
-  expectSkillKeywordsStr: string
-  expectSchoolKeywordsStr: string
-  expectMajorKeywordsStr: string
-  blockCandidateNameRegExpStr: string
+  customRules: UiCustomRule[]
   // 仅 hydrate / serialize 时透传的非 UI 字段
   schoolFloorRank: number | null
   nativeFilter: Record<string, any> | null
@@ -577,11 +642,124 @@ function defaultUiRubric(): UiRubric {
   }
 }
 
+function createRuleId(): string {
+  return `rule_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function defaultRuleCondition(): UiCustomRuleCondition {
+  return {
+    field: 'all',
+    operator: 'containsAny',
+    keywordsStr: '',
+    pattern: ''
+  }
+}
+
+function defaultCustomRule(): UiCustomRule {
+  return {
+    id: createRuleId(),
+    enabled: true,
+    action: 'reject',
+    label: '',
+    ...defaultRuleCondition()
+  }
+}
+
+function normalizeRuleField(value: any): CustomRuleField {
+  return ['all', 'profile', 'skills', 'school', 'major', 'name'].includes(value) ? value : 'all'
+}
+
+function normalizeRuleOperator(value: any): CustomRuleOperator {
+  return ['containsAny', 'notContainsAny', 'regex'].includes(value) ? value : 'containsAny'
+}
+
+function parseRuleCondition(raw: any): UiCustomRuleCondition {
+  return {
+    field: normalizeRuleField(raw?.field),
+    operator: normalizeRuleOperator(raw?.operator),
+    keywordsStr: listToStr(raw?.keywords),
+    pattern: typeof raw?.pattern === 'string' ? raw.pattern : ''
+  }
+}
+
+function parseCustomRules(rawRules: any, f: any, pf: any): UiCustomRule[] {
+  const sourceRules = Array.isArray(rawRules) ? rawRules : legacyHardRulesToUi(f, pf)
+  return sourceRules.map((raw: any) => {
+    const rule: UiCustomRule = {
+      id: createRuleId(),
+      enabled: raw?.enabled !== false,
+      action: 'reject',
+      label: typeof raw?.label === 'string' ? raw.label : '',
+      ...parseRuleCondition(raw)
+    }
+    if (raw?.except && typeof raw.except === 'object') {
+      rule.except = parseRuleCondition(raw.except)
+    }
+    return rule
+  })
+}
+
+function legacyHardRulesToUi(f: any, pf: any): any[] {
+  const fieldRules = pf.fieldRules ?? f.fieldRules ?? {}
+  const exclude = fieldRules.exclude ?? []
+  const include = fieldRules.include ?? []
+  const rules: any[] = []
+  if (Array.isArray(exclude) && exclude.length) {
+    const rule: any = {
+      enabled: true,
+      field: 'all',
+      operator: 'containsAny',
+      keywords: exclude,
+      pattern: '',
+      action: 'reject',
+      label: '命中不对口关键词'
+    }
+    if (Array.isArray(include) && include.length) {
+      rule.except = { field: 'all', operator: 'containsAny', keywords: include, pattern: '' }
+    }
+    rules.push(rule)
+  }
+  const legacy = [
+    ['skills', pf.expectSkillKeywords ?? f.expectSkillKeywords, '技能/优势必须命中'],
+    ['school', pf.expectSchoolKeywords ?? f.expectSchoolKeywords, '院校/标签必须命中'],
+    ['major', pf.expectMajorKeywords ?? f.expectMajorKeywords, '专业必须命中']
+  ]
+  for (const [field, keywords, label] of legacy) {
+    if (Array.isArray(keywords) && keywords.length) {
+      rules.push({
+        enabled: true,
+        field,
+        operator: 'notContainsAny',
+        keywords,
+        pattern: '',
+        action: 'reject',
+        label
+      })
+    }
+  }
+  const namePattern = pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? ''
+  if (typeof namePattern === 'string' && namePattern.trim()) {
+    rules.push({
+      enabled: true,
+      field: 'name',
+      operator: 'regex',
+      keywords: [],
+      pattern: namePattern,
+      action: 'reject',
+      label: '姓名命中屏蔽正则'
+    })
+  }
+  return rules
+}
+
 function rawToJobItem(raw: Record<string, any>): JobItem {
   const f = raw.filter ?? {}
   const pf = f.preFilter ?? {}
   const rec = f.recommend ?? {}
   const ch = f.chat ?? {}
+  const rawCustomRules = Array.isArray(pf.customRules)
+    ? pf.customRules
+    : (Array.isArray(f.customRules) ? f.customRules : null)
   return {
     jobId: raw.jobId ?? raw.id ?? '',
     jobName: raw.jobName ?? raw.name ?? '',
@@ -602,21 +780,14 @@ function rawToJobItem(raw: Record<string, any>): JobItem {
         (pf.expectSalaryWhenNegotiable ?? f.expectSalaryWhenNegotiable) === 'include'
           ? 'include'
           : 'exclude',
-      fieldIncludeStr: listToStr((pf.fieldRules ?? f.fieldRules)?.include),
-      fieldExcludeStr: listToStr((pf.fieldRules ?? f.fieldRules)?.exclude),
-      expectSkillKeywordsStr: listToStr(pf.expectSkillKeywords ?? f.expectSkillKeywords),
-      expectSchoolKeywordsStr: listToStr(pf.expectSchoolKeywords ?? f.expectSchoolKeywords),
-      expectMajorKeywordsStr: listToStr(pf.expectMajorKeywords ?? f.expectMajorKeywords),
-      blockCandidateNameRegExpStr:
-        pf.blockCandidateNameRegExpStr ?? f.blockCandidateNameRegExpStr ?? '',
+      customRules: parseCustomRules(rawCustomRules, f, pf),
       schoolFloorRank: pf.schoolFloorRank ?? f.schoolFloorRank ?? null,
       nativeFilter: pf.nativeFilter ?? f.nativeFilter ?? null,
       // ── ② AI 评分标准 ── 新 filter.rubric 优先，回退旧 filter.resumeLlmConfig
       rubric: parseRubric(f.rubric, f.resumeLlmConfig),
       // ── ③ 推荐牛人页行为 ──
       recommendScoringEnabled: rec.scoringEnabled ?? f.resumeLlmEnabled ?? false,
-      recommendMinScoreToChat:
-        typeof rec.minScoreToChat === 'number' ? rec.minScoreToChat : null,
+      recommendMinScoreToChat: typeof rec.minScoreToChat === 'number' ? rec.minScoreToChat : null,
       recommendOnScoreError: rec.onScoreError === 'chat' ? 'chat' : 'skip',
       recommendSkipViewedCandidates: rec.skipViewedCandidates ?? false,
       // ── ④ 沟通页行为 ──
@@ -655,6 +826,37 @@ function parseRubric(rawRubric: any, oldLlmConfig: any): UiRubric {
   return { sourceJd, modelId, passThreshold, knockouts, dimensions }
 }
 
+function ruleConditionHasValue(condition: UiCustomRuleCondition): boolean {
+  return condition.operator === 'regex'
+    ? condition.pattern.trim().length > 0
+    : strToList(condition.keywordsStr).length > 0
+}
+
+function ruleConditionToRaw(condition: UiCustomRuleCondition) {
+  return {
+    field: condition.field,
+    operator: condition.operator,
+    keywords: condition.operator === 'regex' ? [] : strToList(condition.keywordsStr),
+    pattern: condition.operator === 'regex' ? condition.pattern.trim() : ''
+  }
+}
+
+function customRuleToRaw(rule: UiCustomRule) {
+  const raw: Record<string, any> = {
+    enabled: rule.enabled,
+    field: rule.field,
+    operator: rule.operator,
+    keywords: rule.operator === 'regex' ? [] : strToList(rule.keywordsStr),
+    pattern: rule.operator === 'regex' ? rule.pattern.trim() : '',
+    action: 'reject',
+    label: rule.label.trim()
+  }
+  if (rule.except && ruleConditionHasValue(rule.except)) {
+    raw.except = ruleConditionToRaw(rule.except)
+  }
+  return raw
+}
+
 function jobItemToRaw(job: JobItem): Record<string, any> {
   const f = job.filter
   return {
@@ -674,14 +876,9 @@ function jobItemToRaw(job: JobItem): Record<string, any> {
         expectSalaryMaxEnabled: f.expectSalaryMaxEnabled,
         expectSalaryRange: f.expectSalaryRange,
         expectSalaryWhenNegotiable: f.expectSalaryWhenNegotiable,
-        expectSkillKeywords: strToList(f.expectSkillKeywordsStr),
-        expectSchoolKeywords: strToList(f.expectSchoolKeywordsStr),
-        expectMajorKeywords: strToList(f.expectMajorKeywordsStr),
-        blockCandidateNameRegExpStr: f.blockCandidateNameRegExpStr,
-        fieldRules: {
-          include: strToList(f.fieldIncludeStr),
-          exclude: strToList(f.fieldExcludeStr)
-        },
+        customRules: f.customRules
+          .filter((rule) => ruleConditionHasValue(rule))
+          .map(customRuleToRaw),
         schoolFloorRank: f.schoolFloorRank,
         nativeFilter: f.nativeFilter
       },
@@ -730,6 +927,23 @@ function strToList(str: string): string[] {
     .filter(Boolean)
 }
 
+function addCustomRule(job: JobItem) {
+  job.filter.customRules.push(defaultCustomRule())
+}
+
+function removeCustomRule(job: JobItem, index: number) {
+  job.filter.customRules.splice(index, 1)
+}
+
+function toggleRuleExcept(rule: UiCustomRule, enabled: boolean) {
+  if (enabled && !rule.except) {
+    rule.except = defaultRuleCondition()
+  }
+  if (!enabled) {
+    delete rule.except
+  }
+}
+
 const jobsList = ref<JobItem[]>([])
 const activeJobIds = ref<string[]>([])
 const isSyncing = ref(false)
@@ -737,6 +951,21 @@ const isSyncing = ref(false)
 type BossLlmModelOption = { id: string; label: string }
 const bossLlmEnabledModels = ref<BossLlmModelOption[]>([])
 const bossLlmModelsLoading = ref(false)
+
+const customRuleFieldOptions: Array<{ value: CustomRuleField; label: string }> = [
+  { value: 'all', label: '候选人全文' },
+  { value: 'profile', label: '简历/优势' },
+  { value: 'skills', label: '技能/优势' },
+  { value: 'school', label: '院校/标签' },
+  { value: 'major', label: '专业' },
+  { value: 'name', label: '姓名' }
+]
+
+const customRuleOperatorOptions: Array<{ value: CustomRuleOperator; label: string }> = [
+  { value: 'containsAny', label: '包含任一' },
+  { value: 'notContainsAny', label: '不包含任一' },
+  { value: 'regex', label: '正则匹配' }
+]
 
 const copyDialogVisible = ref(false)
 const copyTargetJob = ref<JobItem | null>(null)
@@ -1103,6 +1332,73 @@ function addDimension(job: JobItem) {
 
     .resume-filter-tip {
       margin-bottom: 8px;
+    }
+
+    .compact-section-label {
+      margin-top: 12px;
+    }
+
+    .custom-rules-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 14px;
+
+      .empty-rules {
+        color: #909399;
+        font-size: 13px;
+        padding: 8px 0;
+      }
+
+      .custom-rule-row {
+        border: 1px solid #ebeef5;
+        border-radius: 6px;
+        padding: 10px;
+        background: #fafafa;
+      }
+
+      .custom-rule-header,
+      .custom-rule-line,
+      .custom-rule-except {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .custom-rule-header {
+        margin-bottom: 8px;
+      }
+
+      .custom-rule-line {
+        margin-bottom: 6px;
+      }
+
+      .rule-label-input {
+        max-width: 220px;
+      }
+
+      .rule-field-select {
+        width: 120px;
+      }
+
+      .rule-operator-select {
+        width: 116px;
+      }
+
+      .rule-value-input {
+        flex: 1;
+        min-width: 220px;
+      }
+
+      .rule-word {
+        color: #606266;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .reject-word {
+        color: #f56c6c;
+      }
     }
 
     .quick-fill-bar {

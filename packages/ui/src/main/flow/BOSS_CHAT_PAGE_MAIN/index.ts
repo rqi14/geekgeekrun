@@ -10,6 +10,7 @@ import { checkShouldExit } from '../../utils/worker'
 import initPublicIpc from '../../utils/initPublicIpc'
 import { forwardConsoleLogToDaemon } from '../../utils/forwardConsoleLogToDaemon'
 import { getLastUsedAndAvailableBrowser } from '../DOWNLOAD_DEPENDENCIES/utils/browser-history'
+import { refreshChatPageForNextRound } from './reusable-page'
 import path from 'path'
 const { default: SqlitePlugin } = SqlitePluginModule
 
@@ -209,6 +210,13 @@ const runChatPage = async () => {
   let peekCapturedText: any = null
   // processContext 提升到循环外，catch 块中可读取被中断的候选人
   const processContext: { currentCandidate: any } = { currentCandidate: null }
+  const clearReusableBrowserState = () => {
+    browser = null
+    page = null
+    getCapturedText = null
+    clearCapturedText = null
+    peekCapturedText = null
+  }
 
   while (true) {
     try {
@@ -224,6 +232,11 @@ const runChatPage = async () => {
       }
       const runOnceAfterComplete = cfg?.chatPage?.runOnceAfterComplete === true
       const keepBrowserOpenAfterRun = cfg?.chatPage?.keepBrowserOpenAfterRun === true
+
+      if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) {
+        log('Reusable browser was closed, launching a fresh browser for this round')
+        clearReusableBrowserState()
+      }
 
       // 仅在没有复用浏览器时才重新启动
       if (!browser) {
@@ -273,7 +286,11 @@ const runChatPage = async () => {
           }
         })
       } else {
-        log('复用已有浏览器实例，直接开始处理...')
+        log('Reusing existing browser, refreshing chat page before this round...')
+        const refreshAction = await refreshChatPageForNextRound(page, BOSS_CHAT_PAGE_URL)
+        log(`Chat page prepared with ${refreshAction}`)
+        await new Promise(r => setTimeout(r, 1500))
+        await dismissGovernanceNoticeDialog(page)
       }
 
       log('读取职位队列配置...')
@@ -320,12 +337,6 @@ const runChatPage = async () => {
         process.exit(0)
       }
 
-      try { await browser.close() } catch (e) { void e }
-      browser = null
-      page = null
-      getCapturedText = null
-      clearCapturedText = null
-      peekCapturedText = null
       const rerunMs = cfg?.chatPage?.rerunIntervalMs ?? rerunInterval
       log(`下次运行将在 ${rerunMs}ms 后开始`)
       await sleep(rerunMs)
@@ -373,11 +384,7 @@ const runChatPage = async () => {
       // ── 正常错误处理：关闭浏览器、识别错误类型 ──
       if (browser) {
         try { await browser.close() } catch (e) { void e }
-        browser = null
-        page = null
-        getCapturedText = null
-        clearCapturedText = null
-        peekCapturedText = null
+        clearReusableBrowserState()
       }
       if (err instanceof Error) {
         if (err.message.includes('LOGIN_STATUS_INVALID')) {

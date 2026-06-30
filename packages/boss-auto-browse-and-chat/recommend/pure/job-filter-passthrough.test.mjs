@@ -3,18 +3,21 @@ import assert from 'node:assert/strict'
 import { __jobFilterToCandidateFilter } from '../../runtime-file-utils.mjs'
 
 test('passes through skills/school/major/blockName/skipViewed', () => {
+  const customRules = [{ field: 'all', operator: 'containsAny', keywords: ['PCR'], action: 'reject' }]
   const out = __jobFilterToCandidateFilter({
     expectSkillKeywords: ['LC-MS'],
     expectSchoolKeywords: ['双一流'],
     expectMajorKeywords: ['食品'],
     blockCandidateNameRegExpStr: '^张',
-    skipViewedCandidates: true
+    skipViewedCandidates: true,
+    customRules
   })
   assert.deepEqual(out.expectSkillKeywords, ['LC-MS'])
   assert.deepEqual(out.expectSchoolKeywords, ['双一流'])
   assert.deepEqual(out.expectMajorKeywords, ['食品'])
   assert.equal(out.blockCandidateNameRegExpStr, '^张')
   assert.equal(out.skipViewedCandidates, true)
+  assert.deepEqual(out.customRules, customRules)
 })
 test('defaults are empty when fields absent', () => {
   const out = __jobFilterToCandidateFilter({})

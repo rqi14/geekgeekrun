@@ -32,6 +32,14 @@
               placeholder="默认 3000"
             />
           </el-form-item>
+          <el-form-item>
+            <el-checkbox v-model="formContent.chatPage.attachmentResume.skipDownload">
+              不打开/下载对方发来的附件简历 PDF
+            </el-checkbox>
+            <div class="form-tip">
+              开启后仍会同意对方发送附件简历，也会发送索取附件简历请求，但检测到附件简历消息时不再点开预览和下载 PDF。
+            </div>
+          </el-form-item>
         </el-card>
 
         <el-alert
@@ -100,6 +108,11 @@ import { ElMessage } from 'element-plus'
 import RunningOverlay from '@renderer/features/RunningOverlay/index.vue'
 import { RUNNING_STATUS_ENUM } from '../../../../../common/enums/auto-start-chat'
 import { getBossAutoBrowseSteps } from '../../../../../common/prerequisite-step-by-step-check'
+import {
+  normalizeBossChatPageConfig,
+  toSavePayload,
+  type BossChatPageState
+} from './mapping'
 
 const { ipcRenderer } = electron
 
@@ -108,24 +121,15 @@ const runRecordId = ref<number | undefined>(undefined)
 const runningOverlayRef = ref<InstanceType<typeof RunningOverlay> | null>(null)
 const isStopButtonLoading = ref(false)
 
-const formContent = reactive({
-  chatPage: {
-    maxProcessPerRun: 20,
-    runOnceAfterComplete: false,
-    keepBrowserOpenAfterRun: false,
-    rerunIntervalMs: 3000
-  }
-})
+const formContent = reactive<BossChatPageState>(
+  normalizeBossChatPageConfig({ 'boss-recruiter.json': {} })
+)
 
 const loadData = async () => {
   try {
     const recruiterResult = await ipcRenderer.invoke('fetch-boss-recruiter-config-file-content')
-    const recruiterConfig = recruiterResult?.config?.['boss-recruiter.json'] || {}
-    const chatPage = recruiterConfig.chatPage ?? {}
-    formContent.chatPage.maxProcessPerRun = chatPage.maxProcessPerRun ?? 20
-    formContent.chatPage.runOnceAfterComplete = chatPage.runOnceAfterComplete ?? false
-    formContent.chatPage.keepBrowserOpenAfterRun = chatPage.keepBrowserOpenAfterRun ?? false
-    formContent.chatPage.rerunIntervalMs = chatPage.rerunIntervalMs ?? 3000
+    const state = normalizeBossChatPageConfig(recruiterResult?.config ?? {})
+    Object.assign(formContent.chatPage, state.chatPage)
   } catch (err) {
     console.error(err)
   }
@@ -135,14 +139,7 @@ onMounted(loadData)
 onActivated(loadData)
 
 const doSave = async () => {
-  const payload = {
-    chatPage: {
-      maxProcessPerRun: formContent.chatPage.maxProcessPerRun,
-      runOnceAfterComplete: formContent.chatPage.runOnceAfterComplete,
-      keepBrowserOpenAfterRun: formContent.chatPage.keepBrowserOpenAfterRun,
-      rerunIntervalMs: formContent.chatPage.rerunIntervalMs
-    }
-  }
+  const payload = toSavePayload(formContent)
   await ipcRenderer.invoke('save-boss-recruiter-config', JSON.stringify(payload))
 }
 
@@ -203,6 +200,13 @@ const handleStopButtonClick = async () => {
     .section-title {
       font-size: 14px;
       font-weight: 500;
+    }
+
+    .form-tip {
+      font-size: 12px;
+      color: #909399;
+      margin-top: 4px;
+      line-height: 1.4;
     }
   }
 
