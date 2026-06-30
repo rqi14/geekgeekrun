@@ -38,6 +38,15 @@ import {
 
 const LOG = '[chat-page-processor]'
 
+const makeChatPageProcessResult = (overrides = {}) => ({
+  totalProcessed: 0,
+  totalAttempted: 0,
+  unreadExhausted: false,
+  reachedMaxProcessPerRun: false,
+  skipped: false,
+  ...overrides
+})
+
 /**
  * 在沟通页切换到指定职位。
  * @param {import('puppeteer').Page} page
@@ -308,7 +317,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
   let page = existingPage
   if (!page) {
     logInfo(`${LOG} 未传入 page，跳过沟通页处理。`)
-    return
+    return makeChatPageProcessResult({ unreadExhausted: true, skipped: true })
   }
 
   const baseConfig = readConfigFile('boss-recruiter.json') || {}
@@ -317,7 +326,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
   const chatPageConfig = config.chatPage || {}
   if (chatPageConfig.enabled === false) {
     logInfo(`${LOG} 沟通页处理已关闭，跳过。`)
-    return
+    return makeChatPageProcessResult({ unreadExhausted: true, skipped: true })
   }
 
   const maxProcessPerRun = chatPageConfig.maxProcessPerRun ?? 20
@@ -390,9 +399,9 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const box = await tabEl.boundingBox().catch(() => null)
       if (box) {
         await cursor.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 })
-        await sleepWithRandomDelay(400, 600)
+        await sleepWithRandomDelay(180, 320)
         try {
-          await page.waitForSelector(CHAT_PAGE_ITEM_SELECTOR, { timeout: 5000 })
+          await page.waitForSelector(CHAT_PAGE_ITEM_SELECTOR, { timeout: opts.listTimeoutMs ?? 1500 })
           logDebug(`${LOG} 「${tabName}」tab 切换后列表已刷新`)
         } catch {
           logDebug(`${LOG} 「${tabName}」tab 切换后列表为空（无会话）`)
@@ -439,7 +448,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         return { processed: false, skipped: true }
       }
       logInfo(`${LOG}   → 会话已选中，等待页面加载...`)
-      await sleepWithRandomDelay(600, 1200)
+      await sleepWithRandomDelay(300, 600)
 
       // 验证右侧面板已切换到目标候选人（防止会话点击未生效、面板仍停留在上一人）
       {
@@ -498,7 +507,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
           acceptedIncoming = true
           logInfo(`${LOG}   → 已同意对方发送附件简历`)
           await logContact(encryptGeekId, 'attachment_resume_accepted_incoming', null, 'success', hooks)
-          await sleepWithRandomDelay(800, 1400)
+          await sleepWithRandomDelay(250, 500)
         } else {
           logWarn(`${LOG}   → 点击"同意"失败（按钮未找到或不可见）`)
         }
@@ -523,7 +532,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         }
         await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
         getInterceptedData()
-        await sleepWithRandomDelay(2000, 4000)
+        await sleepWithRandomDelay(300, 700)
         if (processContext) processContext.currentCandidate = null
         return { processed: true, skipped: false }
       }
@@ -532,7 +541,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         logInfo(`${LOG}   → 已同意附件简历请求，等待对方附件消息后续进入未读列表`)
         await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'contacted' }, hooks)
         getInterceptedData()
-        await sleepWithRandomDelay(500, 1000)
+        await sleepWithRandomDelay(250, 500)
         if (processContext) processContext.currentCandidate = null
         return { processed: true, skipped: false }
       }
@@ -601,7 +610,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         logWarn(`${LOG}   → 未找到「查看在线简历」按钮或 iframe 未出现，跳过`)
         await saveCandidateInfo({ encryptGeekId, geekName, jobTitle, status: 'viewed' }, hooks)
         getInterceptedData()
-        await sleepWithRandomDelay(500, 1000)
+        await sleepWithRandomDelay(250, 500)
         if (processContext) processContext.currentCandidate = null
         return { processed: false, skipped: true }
       }
@@ -667,7 +676,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         logInfo(`${LOG}   → 简历文本获取成功（共 ${resumeText.length} 字）`)
       }
 
-      await sleepWithRandomDelay(2000, 4500)
+      await sleepWithRandomDelay(300, 700)
 
       let pass = true
       let filterReason = ''
@@ -726,7 +735,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
           if (!resumeClosed) {
             logWarn(`${LOG}   → 在线简历弹窗关闭超时，继续尝试（可能影响附件简历按钮点击）`)
           }
-          await sleepWithRandomDelay(500, 1000)
+          await sleepWithRandomDelay(250, 500)
         }
         const { requested, error } = await requestAttachmentResume(page, { cursor })
         if (requested) {
@@ -754,21 +763,17 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
         hooks
       )
       getInterceptedData()
-      await sleepWithRandomDelay(2000, 4500)
+      await sleepWithRandomDelay(300, 700)
       if (processContext) processContext.currentCandidate = null
       return { processed: true, skipped: false }
     }
     // ────────────────────────────────────────────────────────────────────────────
 
-    // ── 初始化：切换到「全部」范围，再强制点击「未读」触发列表刷新 ────────
-    // 推荐牛人打招呼后的附件简历请求不一定归在「新招呼」分类；
-    // 扫描所有未读才能接住“对方想发送附件简历给您，您是否同意”的卡片。
-    // 「未读」tab 只有被实际点击时 BOSS 才会刷新列表；若上次运行后页面已停在「未读」tab，
-    // 不点击则不会刷新，已处理过的会话仍会出现，导致重复操作。因此此处强制点击（force: true）。
-    await switchToTab(CHAT_PAGE_ALL_FILTER_SELECTOR, '全部', { force: true })
-    await sleepWithRandomDelay(300, 500)
+    // ── 初始化：强制点击「未读」触发列表刷新 ─────────────────────────
+    // 推荐牛人回流的附件简历请求会进入未读；扫描未读即可接住确认卡片。
+    // 若上次运行后页面已停在「未读」tab，不点击则可能不刷新，因此这里保留 force。
     await switchToTab(CHAT_PAGE_UNREAD_FILTER_SELECTOR, '未读', { force: true })
-    await sleepWithRandomDelay(400, 600)
+    await sleepWithRandomDelay(150, 250)
     // ────────────────────────────────────────────────────────────────────────────
 
     // ── 验证恢复：若上次被验证中断，优先重试被中断的候选人 ────────────────────────
@@ -780,7 +785,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const retrySel = await selectConversationById(page, retryCandidate.encryptGeekId, { cursor })
       if (retrySel) {
         logInfo(`${LOG} 重试候选人会话已找到，开始处理...`)
-        await sleepWithRandomDelay(600, 1200)
+        await sleepWithRandomDelay(300, 600)
         await processOneCandidateConversation(retryCandidate)
       } else {
         logWarn(`${LOG} 未在「全部」会话中找到重试候选人 ${retryCandidate.geekName}（可能已被处理或不可见），跳过`)
@@ -790,14 +795,14 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       await sleepWithRandomDelay(300)
     }
 
-    // ── 正常扫描：处理全部范围下的未读会话 ─────────────────────────────────
-    // 「全部」范围与「未读」tab 已在上方初始化阶段完成切换（force: true），此处直接解析列表。
+    // ── 正常扫描：处理当前职位下的未读会话 ────────────────────────────
     // 若经过 retryCandidate 流程，retry 结束时已切回「未读」tab，状态同样正确。
 
     // ── 批次循环：每处理 BATCH_REFRESH_SIZE 条后重新点击「未读」刷新列表（步骤4-5）────
     const BATCH_REFRESH_SIZE = 10
     let totalAttempted = 0
     let totalProcessed = 0
+    let unreadExhausted = false
     const seenIds = new Set()
 
     while (totalAttempted < maxProcessPerRun) {
@@ -807,6 +812,7 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       const unreadItems = conversations.filter((c) => c.encryptGeekId && !seenIds.has(c.encryptGeekId))
       if (unreadItems.length === 0) {
         logInfo(`${LOG} 「未读」列表为空，全部处理完毕`)
+        unreadExhausted = true
         break
       }
 
@@ -836,10 +842,17 @@ export default async function startBossChatPageProcess (hooksFromCaller, options
       // 步骤4：每批次结束后重新点击「未读」标签，刷新列表
       logInfo(`${LOG} 本批次结束，重新点击「未读」标签刷新列表...`)
       await switchToTab(CHAT_PAGE_UNREAD_FILTER_SELECTOR, '未读', { force: true })
-      await sleepWithRandomDelay(400, 600)
+      await sleepWithRandomDelay(150, 250)
     }
 
+    const reachedMaxProcessPerRun = totalAttempted >= maxProcessPerRun && !unreadExhausted
     logInfo(`${LOG} 本次共处理 ${totalProcessed} 条未读会话（尝试 ${totalAttempted} 条）`)
+    return makeChatPageProcessResult({
+      totalProcessed,
+      totalAttempted,
+      unreadExhausted,
+      reachedMaxProcessPerRun
+    })
   } catch (err) {
     await hooks.onError?.promise?.(err)
     throw err

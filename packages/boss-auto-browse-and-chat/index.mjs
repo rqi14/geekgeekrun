@@ -78,9 +78,12 @@ export async function initPuppeteer () {
  * 启发式扫描——这样新冒出的弹窗也能被自动关掉，不必每次手工加 selector。
  * @param {import('puppeteer').Page} page
  */
-export async function dismissGovernanceNoticeDialog (page) {
+export async function dismissGovernanceNoticeDialog (page, options = {}) {
+  const initialWaitMs = Number.isFinite(options.initialWaitMs) ? Math.max(0, options.initialWaitMs) : 10000
   // 给已知的治理公告一点时间冒出来；超时也没关系——通用扫描兜底
-  await page.waitForSelector(GOVERNANCE_NOTICE_DIALOG_SELECTOR, { timeout: 10000 }).catch(() => null)
+  if (initialWaitMs > 0) {
+    await page.waitForSelector(GOVERNANCE_NOTICE_DIALOG_SELECTOR, { timeout: initialWaitMs }).catch(() => null)
+  }
   const closed = await dismissBlockingOverlays(page, { maxRounds: 3 }).catch(() => 0)
   if (closed > 0) {
     logInfo(`[boss-auto-browse] 自动关闭了 ${closed} 个登录后浮层（含治理公告）`)

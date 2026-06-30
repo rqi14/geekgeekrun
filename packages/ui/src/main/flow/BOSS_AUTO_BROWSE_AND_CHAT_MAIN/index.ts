@@ -82,7 +82,7 @@ const runAutoBrowseAndChat = async () => {
   log('正在动态 import boss package...')
   type BossAutoBrowseModule = {
     default: (hooks: any, opts?: { returnBrowser?: boolean; jobId?: string; browser?: any; page?: any }) => Promise<void | { browser: any; page: any }>
-    startBossChatPageProcess: (hooks: any, options?: { browser?: any; page?: any; jobId?: string }) => Promise<void>
+    startBossChatPageProcess: (hooks: any, options?: { browser?: any; page?: any; jobId?: string }) => Promise<any>
     initPuppeteer: () => Promise<any>
     launchBrowserAndNavigateToChat: () => Promise<{ browser: any; page: any }>
     bossAutoBrowseEventBus: InstanceType<typeof import('node:events').EventEmitter>
