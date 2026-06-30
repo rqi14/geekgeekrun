@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import gtag from './gtag'
 import buildInfo from '../../common/build-info.json'
 import os from 'node:os'
@@ -10,6 +10,21 @@ import {
   readConfigFile,
   readStorageFile
 } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+
+const devToolsForwardedWebContents = new WeakSet<WebContents>()
+
+function ensureDevToolsStateForwarding(win: BrowserWindow) {
+  const webContents = win.webContents
+  if (devToolsForwardedWebContents.has(webContents)) return
+  devToolsForwardedWebContents.add(webContents)
+  const sendState = (open: boolean) => {
+    if (!webContents.isDestroyed()) {
+      webContents.send('devtools-state-changed', { open })
+    }
+  }
+  webContents.on('devtools-opened', () => sendState(true))
+  webContents.on('devtools-closed', () => sendState(false))
+}
 
 export default function initPublicIpc() {
   ipcMain.on(
@@ -116,11 +131,18 @@ export default function initPublicIpc() {
   ipcMain.on('toggle-devtools', (ev) => {
     const win = BrowserWindow.fromWebContents(ev.sender)
     if (!win) return
+    ensureDevToolsStateForwarding(win)
     if (win.webContents.isDevToolsOpened()) {
       win.webContents.closeDevTools()
     } else {
       win.webContents.openDevTools()
     }
+  })
+  ipcMain.handle('watch-devtools-state', (ev) => {
+    const win = BrowserWindow.fromWebContents(ev.sender)
+    if (!win) return false
+    ensureDevToolsStateForwarding(win)
+    return win.webContents.isDevToolsOpened()
   })
 
   ipcMain.handle('fetch-config-file-content', async () => {
